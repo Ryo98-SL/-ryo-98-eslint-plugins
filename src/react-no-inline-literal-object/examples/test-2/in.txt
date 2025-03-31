@@ -1,0 +1,10 @@
+
+
+function Dummy() {
+
+    const comp = useMemo(() => {
+        return <div></div>
+    },[])
+
+    return <div>{comp}</div>
+}

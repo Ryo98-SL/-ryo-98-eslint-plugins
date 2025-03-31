@@ -1,0 +1,31 @@
+{
+  "name": "eslint-plugin-custom",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "test-nilo": "bun test ./src/react-no-inline-literal-object/index.test",
+    "autofix": " bun run ./src/react-no-inline-literal-object/lint.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/escodegen": "^0.0.10",
+    "@types/estree": "^1.0.6",
+    "@types/node": "^22.13.10",
+    "@types/react": "^19.0.12",
+    "@typescript-eslint/eslint-plugin": "^8.27.0",
+    "@typescript-eslint/parser": "^8.27.0",
+    "eslint": "^9.22.0",
+    "react": "^19.1.0"
+  },
+  "peerDependencies": {
+    "typescript": "^5.8.2"
+  },
+  "dependencies": {
+    "@types/react-dom": "^19.0.4",
+    "@typescript-eslint/rule-tester": "^8.27.0",
+    "escodegen": "^2.1.0",
+    "recast": "^0.23.11",
+    "typescript-eslint": "^8.27.0"
+  }
+}
