@@ -9,6 +9,7 @@
     "allowJs": true,
     "allowSyntheticDefaultImports": true,
     "moduleResolution": "bundler",
+    "esModuleInterop": true,
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
     "noEmit": true,
@@ -24,5 +25,5 @@
     "noPropertyAccessFromIndexSignature": false,
   },
 
-  "exclude": ["node_modules", "dist","**/*.txt"]
+  "exclude": ["node_modules", "dist","**/*.txt", "**/*.json"]
 }

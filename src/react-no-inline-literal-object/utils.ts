@@ -10,7 +10,7 @@ import {
 
 import * as typescript from 'typescript';
 import * as ts from 'typescript';
-import {type NamedImports, SymbolFlags, SyntaxKind, TypeFormatFlags} from 'typescript';
+import {type NamedImports, type SourceFile, SymbolFlags, SyntaxKind, TypeFormatFlags} from 'typescript';
 
 export interface PluginOptions {
     typeDefinitions?: boolean;
@@ -659,10 +659,9 @@ interface ModuleInfo {
 /**
  * 从类型中获取模块信息
  * @param type - 要获取模块信息的 TypeScript 类型
- * @param checker - TypeScript 类型检查器
  * @returns 包含模块名称和导出类型的信息，如果不是从外部模块导入则返回 undefined
  */
-function getModuleInfoFromType(type: ts.Type, checker: ts.TypeChecker): ModuleInfo | undefined {
+function getModuleInfoFromType(type: ts.Type, sourceFile: ts.SourceFile  ): ModuleInfo | undefined {
     // 获取类型的符号
     const symbol = type.getSymbol() || type.aliasSymbol;
     if (!symbol) {
@@ -678,10 +677,10 @@ function getModuleInfoFromType(type: ts.Type, checker: ts.TypeChecker): ModuleIn
 
     // 取第一个声明分析模块信息
     const declaration = declarations[0];
-    let sourceFile = declaration.getSourceFile();
+    let declarationSourceFile = declaration.getSourceFile();
 
     // 如果是从其他文件导入的
-    if (sourceFile) {
+    if (declarationSourceFile) {
         // 检查是否是默认导出
         let isDefaultExport = false;
 
@@ -736,7 +735,7 @@ function getModuleInfoFromType(type: ts.Type, checker: ts.TypeChecker): ModuleIn
         // 从声明文件路径获取模块名称
         else {
             // 获取声明文件的相对路径，并将其转换为模块名称
-            const fileName = sourceFile.fileName;
+            const fileName = declarationSourceFile.fileName;
 
             // 处理不同类型的声明文件
             // node_modules 中的 d.ts 文件
@@ -761,14 +760,10 @@ function getModuleInfoFromType(type: ts.Type, checker: ts.TypeChecker): ModuleIn
             }
             // 项目内部的声明文件
             else {
-                // 将文件路径转换为相对路径模块标识符
-                // 去掉文件扩展名
-                moduleName = fileName.replace(/\.d\.ts$|\.ts$/, '');
-
+                moduleName = fileName;
                 // 将绝对路径转换为相对路径（根据项目结构可能需要调整）
-                // 如果您的项目使用路径映射，可能需要更复杂的逻辑
                 const baseDir = process.cwd();
-                if (moduleName.startsWith(baseDir)) {
+                if (fileName.startsWith(baseDir)) {
                     moduleName = './' + moduleName.substring(baseDir.length + 1);
                 }
             }
@@ -798,7 +793,8 @@ export interface ImportUpdateResult {
 export function analyzeTypeAndCreateImports(
     typeToAnalyze: ts.Type,
     checker: ts.TypeChecker,
-    moduleContext: ts.SourceFile,
+    sourceFile: ts.SourceFile,
+    program: ts.Program,
     options?: { resolveToRelativePath?: boolean }
 ): ImportUpdateResult[] {
     const factory = ts.factory;
@@ -817,15 +813,20 @@ export function analyzeTypeAndCreateImports(
         // Get type symbol
         const symbol = type.getSymbol() || type.aliasSymbol;
         if (symbol) {
-            const moduleInfo = getModuleInfoFromType(type, checker);
-            if (moduleInfo && moduleInfo.moduleName && moduleInfo.moduleName !== moduleContext.fileName) {
+            const moduleInfo = getModuleInfoFromType(type, sourceFile);
+            if (moduleInfo && moduleInfo.moduleName && moduleInfo.moduleName !== sourceFile.fileName) {
 
-                console.log("=>(utils.ts:824) ", {fileName: moduleContext.fileName, moduleName: moduleInfo.moduleName});
-                const moduleDir = path.dirname(moduleContext.fileName);
+                let _moduleName: string;
+                const moduleDir = path.dirname(sourceFile.fileName);
+                if(resolveToRelativePath && path.isAbsolute(moduleInfo.moduleName)) {
+                    _moduleName = path.relative(moduleDir, moduleInfo.moduleName).replace(/\\/g, '/');
+                    if(!_moduleName.startsWith('./')) {
+                        _moduleName = './' + _moduleName;
+                    }
 
-                const _moduleName = resolveToRelativePath && path.isAbsolute(moduleInfo.moduleName)
-                    ?  path.relative(moduleDir, moduleInfo.moduleName).replace(/\\/g, '/')
-                    :  moduleInfo.moduleName;
+                } else {
+                    _moduleName = moduleInfo.moduleName;
+                }
 
 
                 const typeName = symbol.getName();
@@ -866,7 +867,7 @@ export function analyzeTypeAndCreateImports(
         if (type.getCallSignatures && type.getCallSignatures().length > 0) {
             type.getCallSignatures().forEach(signature => {
                 signature.getParameters().forEach(param => {
-                    const paramType = checker.getTypeOfSymbolAtLocation(param, moduleContext);
+                    const paramType = checker.getTypeOfSymbolAtLocation(param, sourceFile);
                     collectTypesToImport(paramType, visited);
                 });
 
@@ -878,27 +879,44 @@ export function analyzeTypeAndCreateImports(
         // Analyze property types
         if (type.isLiteral() && checker.getPropertiesOfType(type).length > 0) {
             checker.getPropertiesOfType(type).forEach(prop => {
-                const propType = checker.getTypeOfSymbolAtLocation(prop, moduleContext);
+                const propType = checker.getTypeOfSymbolAtLocation(prop, sourceFile);
                 collectTypesToImport(propType, visited);
             });
         }
     }
 
+
     // Start analyzing the type
     collectTypesToImport(typeToAnalyze);
+    const dirname = path.dirname(sourceFile.fileName);
+
 
     // Get existing import declarations
-    const existingImports = new Map<string, ts.ImportDeclaration>();
-    for (const statement of moduleContext.statements) {
+    const existingImports = new Map<string | undefined, ts.ImportDeclaration>();
+    for (const statement of sourceFile.statements) {
         if (ts.isImportDeclaration(statement) && ts.isStringLiteral(statement.moduleSpecifier)) {
-            existingImports.set(statement.moduleSpecifier.text, statement);
+            const resolvedModulePath = resolveModulePath(statement.moduleSpecifier.text, program);
+            if(resolvedModulePath) {
+                existingImports.set(resolvedModulePath, statement)
+            } else {
+                existingImports.set(path.resolve(dirname, statement.moduleSpecifier.text).replace(/\\/g, '/'), statement);
+            }
         }
+    }
+
+    const moduleNameToAbsolute = (name: string) => {
+        const resolvedModuleName = resolveModulePath(name, program);
+        if(resolvedModuleName) {
+            return resolvedModuleName
+        }
+
+        return path.resolve(dirname, name).replace(/\\/g, '/');
     }
 
     // Process each module that needs imports
     // Handle default imports
     for (const [moduleName, importName] of defaultExportModulesMap.entries()) {
-        const existingImport = existingImports.get(moduleName);
+        const existingImport = existingImports.get(moduleNameToAbsolute(moduleName));
 
         // Create import clause with default import
         const importClause = factory.createImportClause(
@@ -922,7 +940,7 @@ export function analyzeTypeAndCreateImports(
 
     // Handle namespace imports
     for (const [moduleName, importName] of namespaceImportModulesMap.entries()) {
-        const existingImport = existingImports.get(moduleName);
+        const existingImport = existingImports.get(moduleNameToAbsolute(moduleName));
 
         // Create namespace import
         const namespaceImport = factory.createNamespaceImport(
@@ -951,7 +969,7 @@ export function analyzeTypeAndCreateImports(
 
     // Handle named imports
     for (const [moduleName, typeNames] of typeModulesMap.entries()) {
-        const existingImport = existingImports.get(moduleName);
+        const existingImport = existingImports.get(moduleNameToAbsolute(moduleName));
 
         if (typeNames.size > 0) {
             // Create import specifiers for each named import
@@ -1001,12 +1019,13 @@ export function createImport(
     entityName: string,
     modulePath: string,
     isDefaultImport: boolean,
-    sourceFile: ts.SourceFile
+    sourceFile: ts.SourceFile,
+    program: ts.Program
 ): ImportUpdateResult {
     const factory = ts.factory;
 
     // 查找现有导入声明
-    const existingImport = findExistingImport(sourceFile, modulePath);
+    const existingImport = findExistingImport( modulePath, sourceFile, program);
 
     // 创建导入说明符
     const importSpecifier = factory.createImportSpecifier(
@@ -1052,10 +1071,14 @@ export function createImport(
  * @param modulePath 模块路径
  * @returns 找到的导入声明，如果不存在则返回null
  */
-function findExistingImport(sourceFile: ts.SourceFile, modulePath: string): ts.ImportDeclaration | null {
+function findExistingImport(modulePath: string,sourceFile: ts.SourceFile, progrom: ts.Program): ts.ImportDeclaration | null {
+
     for (const statement of sourceFile.statements) {
         if (ts.isImportDeclaration(statement) && ts.isStringLiteral(statement.moduleSpecifier)) {
-            if (statement.moduleSpecifier.text === modulePath) {
+
+            const resolvedModulePath = resolveModulePath(modulePath,progrom) || modulePath;
+            const resolvedExistPath = resolveModulePath(statement.moduleSpecifier.text, progrom);
+            if (resolvedExistPath === resolvedModulePath) {
                 return statement;
             }
         }
@@ -1077,12 +1100,12 @@ export interface ImportUpdateResult {
  * @param results ImportUpdateResult 数组
  * @returns 合并后的 ImportUpdateResult 数组
  */
-export function mergeImportUpdateResults(results: ImportUpdateResult[]): ImportUpdateResult[] {
+export function mergeImportUpdateResults(results: ImportUpdateResult[], dirname: string): ImportUpdateResult[] {
     const moduleMap = new Map<string, ImportUpdateResult>();
 
     for (const result of results) {
         const moduleSpecifier = ts.isStringLiteral(result.newDeclaration.moduleSpecifier)
-            ? result.newDeclaration.moduleSpecifier.text
+            ? path.resolve(dirname, result.newDeclaration.moduleSpecifier.text)
             : '';
 
         if (!moduleMap.has(moduleSpecifier)) {

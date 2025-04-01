@@ -3,11 +3,11 @@ import eslint from 'eslint';
 import tslint from 'typescript-eslint'
 import eslintjs from '@eslint/js';
 
-import NoInlineLiteralObject from './index.ts';
+import NoInlineLiteralObject from '../index.ts';
 import path from 'path';
 import * as test from 'bun:test';
 import fs from 'fs';
-import {getTestData} from "./utils.ts";
+import {getTestData} from "../utils.ts";
 
 
 RuleTester.afterAll = test.afterAll;

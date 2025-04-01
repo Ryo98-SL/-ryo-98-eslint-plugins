@@ -1,15 +1,15 @@
 import eslint from "eslint";
 import tslint from "typescript-eslint";
 import eslintjs from "@eslint/js";
-import NoInlineLiteralObject from "./index.ts";
-import {getTestData} from "./utils.ts";
+import NoInlineLiteralObject from "../index.ts";
+import {getTestData} from "../utils.ts";
 import {fileURLToPath} from "node:url";
 import path from "path";
 import * as parser from '@typescript-eslint/parser';
 import fs from "fs";
+import {ROOT_PATH} from "../../paths";
 
-const tsconfigRootDir = path.resolve(fileURLToPath(import.meta.url), '../../../');
-const tsconfigPath = path.resolve(tsconfigRootDir, 'tsconfig.json');
+const tsconfigRootDir = ROOT_PATH;
 
 const linter = new eslint.ESLint({
     fix: true,

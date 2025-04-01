@@ -24,6 +24,7 @@ import {AST_NODE_TYPES, ESLintUtils} from '@typescript-eslint/utils';
 import {parse as tsAstParse} from "@typescript-eslint/typescript-estree";
 import ts, {SyntaxKind} from "typescript";
 import type {FlatConfig, RuleFix, RuleFixer} from "@typescript-eslint/utils/ts-eslint";
+import path from "path";
 
 const createRule = ESLintUtils.RuleCreator(
     name => `https://example.com/rule/${name}`,
@@ -177,18 +178,17 @@ const rule = createRule({
                     filename,
                     context
                 );
-                console.log("=>(index.ts:202) sourceFile", !!sourceFile);
                 let importUpdateResults: ImportUpdateResult[] = [];
 
                 const pushImport = (update: ImportUpdateResult | ImportUpdateResult[] ) => {
                     if(sourceFile) {
-                        importUpdateResults = mergeImportUpdateResults(importUpdateResults.concat(update));
+                        importUpdateResults = mergeImportUpdateResults(importUpdateResults.concat(update), path.dirname(filename));
                     }
                 }
 
 
                 if (typeAnnotation && sourceFile) {
-                    pushImport(analyzeTypeAndCreateImports(typeAnnotation, tsChecker, sourceFile))
+                    pushImport(analyzeTypeAndCreateImports(typeAnnotation, tsChecker, sourceFile, tsService.program))
                 }
 
 
@@ -238,7 +238,7 @@ const rule = createRule({
                         const fixes: RuleFix[] = [];
 
                         if(sourceFile) {
-                            pushImport(createImport('useMemo', 'react', false, sourceFile));
+                            pushImport(createImport('useMemo', 'react', false, sourceFile, tsService.program ));
                         }
                         injectWithImport(fixer, fixes);
 

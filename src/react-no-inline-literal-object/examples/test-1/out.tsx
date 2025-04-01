@@ -1,6 +1,5 @@
 import { CSSProperties, useState, useRef, useEffect, useMemo } from "react";
-import {Modal} from "./modal.tsx";
-import { ModalInfoType } from "modal.tsx";
+import { ModalInfoType, Modal } from "./modal.tsx";
 
 const width = '1px';
 const size = 10;
