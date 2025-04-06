@@ -86,7 +86,7 @@ const compiler = webpack(webpackConfig);
 compiler.run((err, stats) => {
     if (err) {
         console.error('❌ webpack编译错误:', err.stack || err);
-        if (err.details) {
+        if (err) {
             console.error('❌ 错误详情:', err);
         }
         process.exit(1);

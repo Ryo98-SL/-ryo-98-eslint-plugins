@@ -4,9 +4,10 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "test-nilo": "bun test ./src/react-no-inline-literal-object/index.test",
-    "autofix": " bun run src/react-no-inline-literal-object/scripts/lint.ts",
-    "bundle": "tsx src/react-no-inline-literal-object/scripts/build.ts"
+    "test-nilo": "bun test ./src/react-pref-autofix/index.test",
+    "autofix": " bun run src/react-pref-autofix/scripts/lint.ts",
+    "bundle": "tsx src/react-pref-autofix/scripts/build.ts",
+    "practice": "bun run /src/ts-practice/direct-import.ts"
   },
   "devDependencies": {
     "@babel/cli": "^7.27.0",

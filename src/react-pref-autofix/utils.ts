@@ -1,4 +1,4 @@
-import type {RuleContext} from '@typescript-eslint/utils/ts-eslint';
+import type {RuleContext, RuleFix, RuleFixer} from '@typescript-eslint/utils/ts-eslint';
 import path from "path";
 import fs from "fs";
 import {
@@ -8,15 +8,28 @@ import {
 } from "@typescript-eslint/typescript-estree";
 
 
-import * as typescript from 'typescript';
-import * as ts from 'typescript';
-import {type NamedImports, type SourceFile, SymbolFlags, SyntaxKind, TypeFormatFlags} from 'typescript';
+import ts, {
+    ExportAssignment,
+    type NamedImports,
+    ObjectFlags,
+    SymbolFlags,
+    SyntaxKind,
+    TypeChecker,
+    TypeFlags
+} from 'typescript';
+import {fileURLToPath} from "node:url";
+import {ScopeManager} from '@typescript-eslint/scope-manager';
 
 export interface PluginOptions {
     typeDefinitions?: boolean;
     shortComponentNameThreshold?: number;
     ignoredComponents?: (string | RegExpConfig)[];
     declarationsPosition?: 'start' | 'end';
+    checkFunction?: boolean;
+    checkArray?: boolean;
+    checkReturnValueOfCalling?: boolean;
+    checkNewExpression?: boolean;
+    checkRegExp?: boolean;
 }
 
 interface RegExpConfig {
@@ -52,7 +65,7 @@ export function shouldIgnoreComponent(
     return false;
 }
 
-type TsService = ParserServicesWithTypeInformation;
+export type TsService = ParserServicesWithTypeInformation;
 
 /**
  * Get property type from TS compiler
@@ -80,8 +93,6 @@ const getTypeFromTsCompiler = (
             const jsxElement = findParentNode(node, AST_NODE_TYPES.JSXElement);
             if (jsxElement) {
 
-                const fcNode = findParentNode(jsxElement, AST_NODE_TYPES.FunctionDeclaration);
-
                 if (jsxElement.openingElement.name.type === AST_NODE_TYPES.JSXIdentifier) {
                     const tagName = jsxElement.openingElement.name.name;
                     if(tagName.match(/^[a-z]/)) {
@@ -89,7 +100,6 @@ const getTypeFromTsCompiler = (
 
                         const reactTypesPath = resolveModulePath('react', tsService.program);
                         if (reactTypesPath) {
-                            console.log("=>(utils.ts:108) reactTypesPath", reactTypesPath);
                             const sourceFile = tsService.program.getSourceFile(reactTypesPath);
                             if (sourceFile) {
                                 const IntrinsicElements = findIntrinsicElementsInterface(sourceFile, tsChecker);
@@ -100,17 +110,16 @@ const getTypeFromTsCompiler = (
                                 });
 
                                 if (ts.isPropertySignature(propertySignature!) && propertySignature.type) {
-                                    const style = tsChecker.getTypeAtLocation(propertySignature.type).getProperties().find(prop => {
+                                    const propSymbol = tsChecker.getTypeAtLocation(propertySignature.type).getProperties().find(prop => {
                                         return prop.name === propName
                                     });
 
 
-                                    const styleType = tsChecker.getTypeOfSymbol(style!);
+                                    const propType = tsChecker.getTypeOfSymbol(propSymbol!);
 
 
-                                    console.log("=>(utils.ts:124) style", tsChecker.typeToString(styleType));
 
-                                    thatType = styleType;
+                                    thatType = propType;
                                 }
                             }
                         }
@@ -130,18 +139,14 @@ const getTypeFromTsCompiler = (
                                 const signatures = componentType.getCallSignatures();
                                 if (signatures.length > 0) {
                                     // 获取第一个参数（props）的类型
-                                    const propsType = tsChecker.getTypeOfSymbol(signatures[0].getParameters()[0]);
+                                    const propsSymbol = signatures[0].getParameters()[0];
+
+                                    const propsType = tsChecker.getTypeOfSymbol(propsSymbol);
                                     if (propsType) {
                                         // 查找特定属性
-                                        const styleProperty = propsType.getProperty(propName);
-
-
-                                        if (styleProperty) {
-
-                                            console.log(`=>(utils.ts:168) ${tagName} ${propName} type `, tsChecker.typeToString(
-                                                tsChecker.getTypeOfSymbol(styleProperty)
-                                            ));
-                                            thatType = tsChecker.getTypeOfSymbol(styleProperty);
+                                        const property = propsType.getProperty(propName);
+                                        if (property) {
+                                            thatType = tsChecker.getTypeOfSymbol(property);
                                         }
                                     }
                                 }
@@ -163,6 +168,10 @@ const getTypeFromTsCompiler = (
     return thatType
 };
 
+
+
+
+
 const resolveModulePath = (moduleName: string, program: ts.Program): string | undefined => {
     const compilerOptions = program.getCompilerOptions();
     const moduleResolutionHost: ts.ModuleResolutionHost = {
@@ -173,7 +182,6 @@ const resolveModulePath = (moduleName: string, program: ts.Program): string | un
         getDirectories: ts.sys.getDirectories,
         useCaseSensitiveFileNames: () => ts.sys.useCaseSensitiveFileNames
     };
-
     const resolved = ts.resolveModuleName(
         moduleName,
         // 使用当前文件作为参考点
@@ -230,7 +238,7 @@ type TypedRuleContext = Readonly<RuleContext<string, [{}]>>;
  * @param context - ESLint context
  * @returns Type annotation
  */
-export const getTypeForProp = (
+export const getTypeNodeForProp = (
     node: any,
     propName: string,
     componentName: string,
@@ -371,29 +379,39 @@ export const findEndInsertPosition = (programNode: any): number => programNode.r
  * @returns Generated variable name
  */
 export const generateVariableName = (
+    sourceNode: TSESTree.Node,
+    tsService: TsService,
     componentName: string,
     propName: string,
-    existingConstants: Map<string, string>
+    capitalLower?: boolean,
 ): string => {
     // Convert property name to PascalCase
+
     let propNamePascal = propName
         .split(/[-_]/)
-        .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+        .map((part, index) => part.charAt(0)['toUpperCase']() + part.slice(1))
         .join('');
 
     // Ensure first letter is uppercase
     propNamePascal = propNamePascal.charAt(0).toUpperCase() + propNamePascal.slice(1);
 
+    if(capitalLower) {
+        componentName = componentName[0].toLowerCase() + componentName.slice(1);
+    }
+
     // Combine to create ComponentNamePropName format
     let baseName = `${componentName}${propNamePascal}`;
+
+    const scopedVariables = tsService.program.getTypeChecker().getSymbolsInScope(
+        tsService.esTreeNodeToTSNodeMap.get(sourceNode),
+        SymbolFlags.BlockScopedVariable
+    ).map(s => s.name);
 
     // Check for name conflicts, add numeric suffix if needed
     let finalName = baseName;
     let count = 1;
 
-    const usedNames = new Set(Array.from(existingConstants.values()));
-
-    while (usedNames.has(finalName)) {
+    while (scopedVariables.includes(finalName)) {
         finalName = `${baseName}${count}`;
         count++;
     }
@@ -438,10 +456,6 @@ export const processIgnoredComponentsConfig = (ignoredComponentsConfig: (string 
 
 type DeclarationNodeType = TSESTree.VariableDeclarator | TSESTree.FunctionDeclaration | TSESTree.ClassDeclaration
 
-type SymbolSet = Set<typescript.Symbol>;
-
-
-
 
 export const findReferenceUsagesInScope = (
     tsServices: TsService,
@@ -449,142 +463,70 @@ export const findReferenceUsagesInScope = (
 ) => {
     const tsNode = tsServices.esTreeNodeToTSNodeMap.get(node);
 
+    const outerReferences = new Set<ts.Symbol>();
     const tsChecker = tsServices.program.getTypeChecker();
-    const symbolsInScope = tsChecker.getSymbolsInScope( tsServices.esTreeNodeToTSNodeMap.get(node) , SymbolFlags.BlockScopedVariable)
 
-    const refSymbolsInScope = symbolsInScope.filter((s) => {
-            if(!s.valueDeclaration) return false;
-            return findParentNode(tsServices.tsNodeToESTreeNodeMap.get(s.valueDeclaration), node.type) !== node;
-        });
-
-
-    const usageSet = new Set<ts.Symbol>();
-    const visit = (_node: ts.Node) => {
-        ts.forEachChild(_node, (child) => {
-
-            let childSymbol = tsChecker.getSymbolAtLocation(child);
-            visit(child);
-
-            if(ts.isShorthandPropertyAssignment(child)) {
-                // 向上遍历作用域，查找变量声明
-                let currentScope: ts.Node | undefined = child;
-                while (currentScope) {
-                    // 查找当前作用域中的变量声明
-                    const declaration = findVariableDeclarationInScope(currentScope, child.name.text);
-                    if (declaration && declaration.name) {
-                        childSymbol = tsChecker.getSymbolAtLocation(declaration.name);
-                    }
-
-                    // 移动到上一级作用域
-                    currentScope = currentScope.parent;
-                }
-
-            }
-
-
-            if(!childSymbol || !childSymbol.valueDeclaration) {
-                return;
-            }
-
-
-            if(refSymbolsInScope.includes(childSymbol) ) {
-
-                usageSet.add(childSymbol);
-            }
-        })
-    }
-
-    visit(tsNode)
-
-    return usageSet;
-};
-
-function findVariableDeclarationInScope(
-    scopeNode: ts.Node,
-    variableName: string
-) {
-    let foundDeclaration: ts.VariableDeclaration | ts.BindingElement | ts.FunctionDeclaration | ts.ClassDeclaration | undefined;
-
-    function visit(node: ts.Node) {
-        // 查找变量声明
-        if (
-
-            (ts.isVariableDeclaration(node) || ts.isBindingElement(node) || ts.isClassDeclaration(node) || ts.isFunctionDeclaration(node)) &&
-            node.name &&
-            ts.isIdentifier(node.name) &&
-            node.name.getText() === variableName) {
-            foundDeclaration = node;
-            return;
-        }
-
-        // 继续遍历子节点，直到找到或遍历完
-        if (!foundDeclaration) {
-            ts.forEachChild(node, visit);
-        }
-    }
-
-    visit(scopeNode);
-    return foundDeclaration;
-}
-
-
-/**
- * 检查符号是否为本地声明
- */
-const isLocalSymbol = (
-    symbol: typescript.Symbol,
-    localSymbols: SymbolSet
-): boolean => {
-    return Array.from(localSymbols).some(
-        localSymbol => localSymbol === symbol
-    );
-};
-
-export const getIdentifierDeclarationNode = (node: TSESTree.Node) => {
-    let current: TSESTree.Node | undefined  = node;
-
-
-    if(node.type === AST_NODE_TYPES.ClassDeclaration || node.type === AST_NODE_TYPES.VariableDeclaration || node.type === AST_NODE_TYPES.FunctionDeclaration || node.type === AST_NODE_TYPES.ImportDeclaration) {
-        return node;
-    }
-
-    if(node.type !== AST_NODE_TYPES.Identifier) {
-        return  null;
-    }
-
-    while(current) {
-        const programOrBlockStatement = findParentNode(current, [
-            AST_NODE_TYPES.Program,
-            AST_NODE_TYPES.BlockStatement
-        ]);
-
-        if(programOrBlockStatement) {
-            const foundIndex = programOrBlockStatement.body.findIndex((_node) => {
-                let match = false;
-                if(_node.type === AST_NODE_TYPES.FunctionDeclaration || _node.type === AST_NODE_TYPES.ClassDeclaration) {
-                    match = _node.id.name === node.name;
-
-                } else if(_node.type === AST_NODE_TYPES.VariableDeclaration) {
-                    for (const declaration of _node.declarations) {
-                        match = valueDeclarationHasName(declaration.id, node.name);
-                        if(match) break;
-                    }
-                }
-
-                return match;
-            });
-
-            if(foundIndex > -1) {
-                return programOrBlockStatement.body[foundIndex] ?? null;
+    function analyzeIdentifiers(_node: ts.Node) {
+        if (ts.isIdentifier(_node) || ts.isShorthandPropertyAssignment(_node)) {
+            // 获取标识符的符号
+            let symbol: ts.Symbol | undefined;
+            if(ts.isShorthandPropertyAssignment(_node)) {
+                symbol = tsChecker.getShorthandAssignmentValueSymbol(_node)
             } else {
-                current = current.parent;
+                symbol = tsChecker.getSymbolAtLocation(_node)
             }
-        } else {
-            return null;
+
+            if (symbol) {
+                const valueDeclaration = symbol.valueDeclaration;
+                if (valueDeclaration) {
+
+                    // 检查声明是否在箭头函数外部
+                    if (!isNodeDescendant(valueDeclaration, tsNode)) {
+                        // 这是一个外部引用
+                        outerReferences.add(symbol);
+                    }
+                }
+            }
         }
+
+        ts.forEachChild(_node, analyzeIdentifiers);
     }
 
+    analyzeIdentifiers(tsNode);
+
+    return outerReferences;
+};
+
+function isFromLib(symbol: ts.Symbol): boolean {
+    if (!symbol.valueDeclaration) return false;
+
+    const fileName = symbol.valueDeclaration.getSourceFile().fileName;
+    return fileName.includes("lib.") && fileName.includes(".d.ts");
 }
+
+export const isNodeDescendant = (node: ts.Node, potentialAncestor: ts.Node): boolean => {
+    let current: ts.Node | undefined = node.parent;
+    while (current) {
+        if (current === potentialAncestor) {
+            return true;
+        }
+        current = current.parent;
+    }
+    return false;
+};
+
+export const isNodeDescendantWithKind = <T extends SyntaxKind>(node: ts.Node, kind: T): null | ts.Node => {
+    let current: ts.Node | undefined = node.parent;
+    while (current) {
+        if (current.kind === kind) {
+            return current;
+        }
+        current = current.parent;
+    }
+
+    return null
+};
+
 
 const isBindingNameNode = (node: TSESTree.Node): node is TSESTree.BindingName => {
     return node.type === AST_NODE_TYPES.ObjectPattern || node.type === AST_NODE_TYPES.ArrayPattern || node.type === AST_NODE_TYPES.Identifier;
@@ -630,7 +572,7 @@ export const addIndentationToEachLine = (code: string, spacesToAdd: number = 2, 
 };
 
 
-const ExampleDirPath = path.join(__dirname, './examples');
+const ExampleDirPath = path.join(fileURLToPath(import.meta.url), '../examples');
 
 function readTestFile (subPath: string)  {
     return fs.readFileSync(path.resolve(ExampleDirPath, subPath)).toString()
@@ -661,7 +603,7 @@ interface ModuleInfo {
  * @param type - 要获取模块信息的 TypeScript 类型
  * @returns 包含模块名称和导出类型的信息，如果不是从外部模块导入则返回 undefined
  */
-function getModuleInfoFromType(type: ts.Type, sourceFile: ts.SourceFile  ): ModuleInfo | undefined {
+function getModuleInfoFromType(type: ts.Type, tsService: TsService, tsChecker: ts.TypeChecker  ): ModuleInfo | undefined {
     // 获取类型的符号
     const symbol = type.getSymbol() || type.aliasSymbol;
     if (!symbol) {
@@ -670,15 +612,17 @@ function getModuleInfoFromType(type: ts.Type, sourceFile: ts.SourceFile  ): Modu
 
     // 获取符号的声明
     const declarations = symbol.getDeclarations();
+
     if (!declarations || declarations.length === 0) {
 
         return undefined;
     }
 
+
     // 取第一个声明分析模块信息
     const declaration = declarations[0];
-    let declarationSourceFile = declaration.getSourceFile();
 
+    let declarationSourceFile = declaration.getSourceFile();
     // 如果是从其他文件导入的
     if (declarationSourceFile) {
         // 检查是否是默认导出
@@ -736,7 +680,6 @@ function getModuleInfoFromType(type: ts.Type, sourceFile: ts.SourceFile  ): Modu
         else {
             // 获取声明文件的相对路径，并将其转换为模块名称
             const fileName = declarationSourceFile.fileName;
-
             // 处理不同类型的声明文件
             // node_modules 中的 d.ts 文件
             if (fileName.includes('node_modules')) {
@@ -755,6 +698,7 @@ function getModuleInfoFromType(type: ts.Type, sourceFile: ts.SourceFile  ): Modu
                 }
                 // 普通包
                 else {
+                    console.log("=>(utils.ts:760) ", );
                     moduleName = packagePathParts[0];
                 }
             }
@@ -792,9 +736,11 @@ export interface ImportUpdateResult {
 
 export function analyzeTypeAndCreateImports(
     typeToAnalyze: ts.Type,
-    checker: ts.TypeChecker,
+    tsService: TsService,
+    tsChecker: ts.TypeChecker,
     sourceFile: ts.SourceFile,
     program: ts.Program,
+    scopeManager: ScopeManager,
     options?: { resolveToRelativePath?: boolean }
 ): ImportUpdateResult[] {
     const factory = ts.factory;
@@ -812,9 +758,17 @@ export function analyzeTypeAndCreateImports(
 
         // Get type symbol
         const symbol = type.getSymbol() || type.aliasSymbol;
-        if (symbol) {
-            const moduleInfo = getModuleInfoFromType(type, sourceFile);
-            if (moduleInfo && moduleInfo.moduleName && moduleInfo.moduleName !== sourceFile.fileName) {
+
+        if (symbol && (!tsChecker.isArrayType(type) || type.aliasSymbol) ) {
+
+            let moduleInfo: ModuleInfo | undefined;
+            if(type.aliasSymbol) {
+                moduleInfo = findSymbolExportInfo(type.aliasSymbol);
+            } else {
+                moduleInfo = getModuleInfoFromType(type, tsService, tsChecker);
+            }
+
+            if (moduleInfo && moduleInfo.moduleName && moduleInfo.moduleName !== sourceFile.fileName && moduleInfo.moduleName !== 'typescript') {
 
                 let _moduleName: string;
                 const moduleDir = path.dirname(sourceFile.fileName);
@@ -828,9 +782,25 @@ export function analyzeTypeAndCreateImports(
                     _moduleName = moduleInfo.moduleName;
                 }
 
+                const isInterfaceType = ((type.flags & TypeFlags.Object) && ((type as ts.ObjectType).objectFlags & ObjectFlags.Interface)) !== 0;
 
-                const typeName = symbol.getName();
+                console.log("=>(utils.ts:845) analyze type", {
+                    moduleInfo,
+                    isArrayType: tsChecker.isArrayType(type),
+                    isInterfaceType,
+                    aliasSymbol: type.aliasSymbol?.name,
+                    typeString: tsChecker.typeToString(type)
+                }  );
 
+
+
+                if(!type.aliasSymbol && !isInterfaceType) {
+                    return;
+                }
+
+
+                const typeName = type.aliasSymbol ? type.aliasSymbol.getName() : type.symbol.getName();
+                if(!typeName) return;
                 // Check if it's a default export
                 if (symbol.escapedName === "default" || moduleInfo.isDefaultExport) {
                     defaultExportModulesMap.set(_moduleName, typeName);
@@ -842,6 +812,7 @@ export function analyzeTypeAndCreateImports(
                     typeModulesMap.get(_moduleName)!.add(typeName);
                 }
             }
+
         }
 
         // Handle union and intersection types
@@ -851,7 +822,7 @@ export function analyzeTypeAndCreateImports(
         }
 
         // Handle generic type parameters
-        if (type.flags & ts.TypeFlags.Object) {
+        if (type.flags & ts.TypeFlags.Object && !type.aliasSymbol) {
             const objectType = type as ts.ObjectType;
             if (objectType.objectFlags & ts.ObjectFlags.Reference) {
                 const typeReference = type as ts.TypeReference;
@@ -867,7 +838,7 @@ export function analyzeTypeAndCreateImports(
         if (type.getCallSignatures && type.getCallSignatures().length > 0) {
             type.getCallSignatures().forEach(signature => {
                 signature.getParameters().forEach(param => {
-                    const paramType = checker.getTypeOfSymbolAtLocation(param, sourceFile);
+                    const paramType = tsChecker.getTypeOfSymbolAtLocation(param, sourceFile);
                     collectTypesToImport(paramType, visited);
                 });
 
@@ -877,9 +848,9 @@ export function analyzeTypeAndCreateImports(
         }
 
         // Analyze property types
-        if (type.isLiteral() && checker.getPropertiesOfType(type).length > 0) {
-            checker.getPropertiesOfType(type).forEach(prop => {
-                const propType = checker.getTypeOfSymbolAtLocation(prop, sourceFile);
+        if (type.isLiteral() && tsChecker.getPropertiesOfType(type).length > 0) {
+            tsChecker.getPropertiesOfType(type).forEach(prop => {
+                const propType = tsChecker.getTypeOfSymbolAtLocation(prop, sourceFile);
                 collectTypesToImport(propType, visited);
             });
         }
@@ -1272,3 +1243,182 @@ const isTypeUsable = (
 
     return { isAvailable: false };
 };
+
+
+
+export const injectWithImport = (fixer: RuleFixer, fixes: RuleFix[], tsService: TsService, printer: ts.Printer, importUpdateResults?: ImportUpdateResult[], sourceFile?: ts.SourceFile) => {
+    if (!sourceFile) {
+        return;
+    }
+
+    importUpdateResults?.forEach((updateResult) => {
+        const newImportText = printer.printNode(
+            ts.EmitHint.Unspecified,
+            updateResult.newDeclaration,
+            sourceFile
+        );
+
+        if (updateResult.originalDeclaration) {
+            const originImportDeclaration = tsService.tsNodeToESTreeNodeMap.get(updateResult.originalDeclaration);
+            fixes.push(fixer.replaceText(originImportDeclaration, newImportText));
+        } else {
+            const lastImportStatement = sourceFile.statements.findLast(st => st.kind === SyntaxKind.ImportDeclaration)
+            if (lastImportStatement) {
+                const insertNodeOrToken = tsService.tsNodeToESTreeNodeMap.get(lastImportStatement);
+                fixes.push(
+                    fixer.insertTextAfter(insertNodeOrToken, '\n' + newImportText)
+                )
+            } else {
+                fixes.push(
+                    fixer.insertTextBeforeRange([0,0], newImportText)
+                )
+            }
+        }
+
+    })
+}
+
+export type FixScene = 'top-level-constant' | 'hook';
+
+export const getConstDeclarationText = (
+    tsExpression: ts.FunctionExpression | ts.ObjectLiteralExpression,
+    variableName: string,
+    type: ts.Type | undefined | null,
+    printer: ts.Printer,
+    sourceFile: ts.SourceFile | undefined,
+    tsChecker: ts.TypeChecker) => {
+
+    const typeNode = type ? tsChecker.typeToTypeNode(type, undefined, undefined) : undefined;
+
+    const variableDeclaration = ts.factory.createVariableDeclaration(variableName, undefined, typeNode, tsExpression);
+
+    const variableDeclarationList = ts.factory.createVariableDeclarationList([variableDeclaration], ts.NodeFlags.Const);
+    const variableStatement = ts.factory.createVariableStatement(undefined, variableDeclarationList);
+    let declarationString = printer.printNode(ts.EmitHint.Unspecified, variableStatement, sourceFile!);
+
+    return {
+        declaration: variableDeclarationList,
+        text: '\n' + declarationString + '\n'
+    };
+};
+
+export const getHookDeclarationText = (
+    hookName: string,
+    tsExpression: ts.FunctionExpression | ts.ObjectLiteralExpression,
+    variableName: string,
+    type: ts.Type | undefined | null,
+    references: ts.Symbol[],
+    printer: ts.Printer,
+    sourceFile: ts.SourceFile | undefined,
+    tsChecker: ts.TypeChecker
+) => {
+
+
+
+    let typeNode: ts.TypeNode | undefined = undefined;
+
+    if(type?.isUnion() && hookName === 'useCallback') {
+        const types = type.types.filter(_type => !!_type.getCallSignatures().length);
+
+        typeNode = ts.factory.createUnionTypeNode( types.map(t => tsChecker.typeToTypeNode(t, undefined, undefined)).filter(t => !!t) );
+    } else {
+        typeNode = type ? tsChecker.typeToTypeNode(type, undefined, undefined) : undefined;
+    }
+
+    const identifier = ts.factory.createIdentifier(hookName);
+
+    let firstExpress: ts.Expression;
+
+
+    if(hookName === 'useMemo') {
+        const returnSt = ts.factory.createReturnStatement(tsExpression);
+        const bodyBlock = ts.factory.createBlock([
+            returnSt
+        ]);
+
+        const wrapperArrowFnExpression = ts.factory.createArrowFunction(undefined, undefined, [], undefined, undefined, bodyBlock);
+
+        firstExpress = wrapperArrowFnExpression
+    } else {
+
+        firstExpress = tsExpression;
+    }
+
+    const referencesIdentifiers = references.map(ref => {
+        return ts.factory.createIdentifier(ref.name);
+    })
+    const depsArray = ts.factory.createArrayLiteralExpression(referencesIdentifiers);
+
+
+    const hookExpression = ts.factory.createCallExpression(
+        identifier,
+        typeNode ? [typeNode] : typeNode,
+        [
+            firstExpress,
+            depsArray
+        ]
+    );
+
+
+    const variableDeclaration = ts.factory.createVariableDeclaration(variableName, undefined, undefined, hookExpression);
+    const variableDeclarationList = ts.factory.createVariableDeclarationList([variableDeclaration], ts.NodeFlags.Const);
+
+    const variableStatement = ts.factory.createVariableStatement(undefined, variableDeclarationList);
+
+    let declarationString = printer.printNode(ts.EmitHint.Unspecified, variableStatement, sourceFile!);
+
+    return {
+        text: '\n' + declarationString + '\n',
+        variableStatement
+    }
+}
+
+const findSymbolExportInfo = (symbol: ts.Symbol): ModuleInfo | undefined => {
+    const declarations = symbol.getDeclarations();
+
+    if(symbol.valueDeclaration) {
+        const isNamedExport = ts.canHaveModifiers(symbol.valueDeclaration) && !!symbol.valueDeclaration.modifiers?.some(m => m.kind === ts.SyntaxKind.ExportKeyword);
+
+        if(isNamedExport) {
+            return {
+                isDefaultExport: false,
+                moduleName: symbol.valueDeclaration.getSourceFile().fileName
+            }
+        }
+    }
+
+    if(declarations && declarations.length > 0) {
+        for (const declaration of declarations) {
+            const sourceFile = declaration.getSourceFile();
+            const moduleName= sourceFile.moduleName || sourceFile.fileName;
+
+            const found = ts.forEachChild(sourceFile, child => {
+
+                if(ts.canHaveModifiers(child)
+                    && !!child.modifiers?.some(m => m.kind === ts.SyntaxKind.ExportKeyword)
+                    && 'name' in child
+                    && child.name?.getText() === symbol.getName()
+                ) {
+                    return 'namedExport'
+                } else if(ts.isExportAssignment(child) && ts.isIdentifier(child.expression) && ( console.log(child.expression.text, symbol.getName()) ,child.expression.text === symbol.getName())) {
+                    
+                    return 'defaultExport'
+                } else if(ts.isExportDeclaration(child) && child.exportClause && ts.isNamedExports(child.exportClause) && child.exportClause.elements.find(el => el.name.text === symbol.getName())) {
+                    return 'namedExport'
+                }
+            });
+
+
+            if(found) return {
+                isDefaultExport: found === 'defaultExport',
+                moduleName
+            };
+        }
+    }
+
+    return undefined;
+}
+
+
+export const SetStateTypeStringPattern = /Dispatch<SetStateAction<.*>>/
+export const RefPattern = /(RefObject|MutableRefObject)<.*>/

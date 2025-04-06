@@ -3,7 +3,7 @@ import eslint from 'eslint';
 import tslint from 'typescript-eslint'
 import eslintjs from '@eslint/js';
 
-import NoInlineLiteralObject from '../index.ts';
+import ReactNoInlineLiterals from '../index.ts';
 import path from 'path';
 import * as test from 'bun:test';
 import fs from 'fs';
@@ -37,7 +37,7 @@ const {content: testFileContents} = getTestData(1)
 
 ruleTester.run(
     "no-inline-object-literals",
-    NoInlineLiteralObject.rules["no-inline-object-literals"],
+    ReactNoInlineLiterals.rules["no-inline-literal-object"],
     {
     valid: [
         ``
@@ -51,7 +51,7 @@ ruleTester.run(
                     messageId: 'noInline',
                     suggestions: [
                         {
-                            messageId: 'fixWithUseMemo',
+                            messageId: 'fixWithUseHook',
                             output: testFileContents[1],
                         }
                     ]
