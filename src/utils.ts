@@ -558,7 +558,7 @@ export const addIndentationToEachLine = (code: string, spacesToAdd: number = 2, 
 };
 
 
-const ExampleDirPath = path.join(fileURLToPath(import.meta.url), '../react-pref-autofix/examples');
+const ExampleDirPath = path.join(fileURLToPath(import.meta.url), '../react-attr-autofix/examples');
 
 function readTestFile (subPath: string)  {
     return fs.readFileSync(path.resolve(ExampleDirPath, subPath)).toString()

@@ -33,11 +33,11 @@ const linter = new eslint.ESLint({
             },
             files: ['**/*.tsx'],
             plugins: {
-                'react-pref-autofix': ReactNoInlineLiterals
+                'react-attr-autofix': ReactNoInlineLiterals
             },
             rules: {
-                'react-pref-autofix/no-inline-literal-object': ['warn', ReactNoInlineLiterals.rules["no-inline-literal-object"].defaultOptions[0]],
-                'react-pref-autofix/auto-create-ref': ['warn']
+                'react-attr-autofix/no-inline-literal-object': ['warn', ReactNoInlineLiterals.rules["no-inline-literal-object"].defaultOptions[0]],
+                'react-attr-autofix/auto-create-ref': ['warn']
             }
 
         })});

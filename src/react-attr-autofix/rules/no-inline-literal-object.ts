@@ -194,10 +194,10 @@ export const noInlineLiteralObjectRule = createRule({
                     return;
                 }
                 const references = findReferenceUsagesInScope(tsService, expression);
+
                 const componentScopedReferences = Array.from(references.values()).filter(s => {
                     if (!s.valueDeclaration) return false;
                     const symbolNode = tsService.tsNodeToESTreeNodeMap.get(s.valueDeclaration!);
-
 
                     const foundFunctionNode = findParentNode(symbolNode, [AST_NODE_TYPES.FunctionDeclaration, AST_NODE_TYPES.ArrowFunctionExpression]);
                     return foundFunctionNode === functionComponentNode;

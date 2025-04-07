@@ -4,9 +4,9 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "test-nilo": "bun test ./src/react-pref-autofix/index.test",
-    "autofix": " bun run src/react-pref-autofix/scripts/lint.ts",
-    "bundle": "tsx src/react-pref-autofix/scripts/build.ts",
+    "test-nilo": "bun test ./src/react-attr-autofix/index.test",
+    "autofix": " bun run src/react-attr-autofix/scripts/lint.ts",
+    "bundle": "tsx src/react-attr-autofix/scripts/build.ts",
     "practice": "bun run /src/ts-practice/direct-import.ts"
   },
   "devDependencies": {
