@@ -1,5 +1,5 @@
-import {Dialog} from "../dialog.tsx";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { DialogAPI, Dialog } from "./../dialog.tsx";
+import {useRef, useState} from "react";
 
 
 function Dummy() {
@@ -7,15 +7,14 @@ function Dummy() {
     const [count, setCount] = useState(1);
     const numberRef = useRef(0);
     
-    const dialogWidth = useMemo<{ get: () => number; } | undefined>(() => { return { get: () => numberRef.current }; }, []);
-    
-    const dialogOnClose = useCallback<(() => void)>(() => {
-        console.log("=>(in.tsx:10) hello");
-        setCount(count + 1);
-    }, [count]);
+    const dialogRef = useRef<DialogAPI>(null);
     return <div>
-        <Dialog width={dialogWidth}
-                onClose={dialogOnClose}
+        <Dialog width={{get: () => numberRef.current}}
+                onClose={() => {
+                    console.log("=>(in.tsx:10) hello", );
+                    setCount(count + 1);
+                }}
+                ref={dialogRef}
         />
 
     </div>

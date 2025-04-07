@@ -8,31 +8,16 @@ import {
 } from "@typescript-eslint/typescript-estree";
 
 
-import ts, {
-    ExportAssignment,
-    type NamedImports,
-    ObjectFlags,
-    SymbolFlags,
-    SyntaxKind,
-    TypeChecker,
-    TypeFlags
-} from 'typescript';
+import ts, {type NamedImports, ObjectFlags, SymbolFlags, SyntaxKind, TypeFlags} from 'typescript';
 import {fileURLToPath} from "node:url";
 import {ScopeManager} from '@typescript-eslint/scope-manager';
+import {ESLintUtils} from "@typescript-eslint/utils";
+import {Scope} from "@typescript-eslint/utils/ts-eslint";
 
-export interface PluginOptions {
-    typeDefinitions?: boolean;
-    shortComponentNameThreshold?: number;
-    ignoredComponents?: (string | RegExpConfig)[];
-    declarationsPosition?: 'start' | 'end';
-    checkFunction?: boolean;
-    checkArray?: boolean;
-    checkReturnValueOfCalling?: boolean;
-    checkNewExpression?: boolean;
-    checkRegExp?: boolean;
-}
 
-interface RegExpConfig {
+
+
+export interface RegExpConfig {
     pattern: string;
     flags?: string;
 }
@@ -139,8 +124,8 @@ const getTypeFromTsCompiler = (
                                 const signatures = componentType.getCallSignatures();
                                 if (signatures.length > 0) {
                                     // 获取第一个参数（props）的类型
-                                    const propsSymbol = signatures[0].getParameters()[0];
-
+                                    const parameters = signatures[0].getParameters();
+                                    const propsSymbol = parameters[ 0];
                                     const propsType = tsChecker.getTypeOfSymbol(propsSymbol);
                                     if (propsType) {
                                         // 查找特定属性
@@ -384,6 +369,7 @@ export const generateVariableName = (
     componentName: string,
     propName: string,
     capitalLower?: boolean,
+    beforeCheckDuplicate?: (name: string) => string
 ): string => {
     // Convert property name to PascalCase
 
@@ -408,7 +394,7 @@ export const generateVariableName = (
     ).map(s => s.name);
 
     // Check for name conflicts, add numeric suffix if needed
-    let finalName = baseName;
+    let finalName =  beforeCheckDuplicate?.(baseName) ?? baseName;
     let count = 1;
 
     while (scopedVariables.includes(finalName)) {
@@ -572,7 +558,7 @@ export const addIndentationToEachLine = (code: string, spacesToAdd: number = 2, 
 };
 
 
-const ExampleDirPath = path.join(fileURLToPath(import.meta.url), '../examples');
+const ExampleDirPath = path.join(fileURLToPath(import.meta.url), '../react-pref-autofix/examples');
 
 function readTestFile (subPath: string)  {
     return fs.readFileSync(path.resolve(ExampleDirPath, subPath)).toString()
@@ -1302,9 +1288,9 @@ export const getConstDeclarationText = (
     };
 };
 
-export const getHookDeclarationText = (
+export const getMemoCallbackHookDeclarationText = (
     hookName: string,
-    tsExpression: ts.FunctionExpression | ts.ObjectLiteralExpression,
+    tsExpression: ts.FunctionExpression | ts.ObjectLiteralExpression ,
     variableName: string,
     type: ts.Type | undefined | null,
     references: ts.Symbol[],
@@ -1373,6 +1359,40 @@ export const getHookDeclarationText = (
     }
 }
 
+export const getRefHookDeclarationText = (
+    variableName: string,
+    type: ts.Type | undefined | null,
+    printer: ts.Printer,
+    sourceFile: ts.SourceFile | undefined,
+    tsChecker: ts.TypeChecker
+) => {
+    const identifier = ts.factory.createIdentifier('useRef');
+    const typeNode = type ? tsChecker.typeToTypeNode(type, undefined, undefined) : undefined;
+
+    const valueNode = ts.factory.createNull();
+
+    const hookExpression = ts.factory.createCallExpression(
+        identifier,
+        typeNode ? [typeNode] : typeNode,
+        [
+            valueNode,
+        ]
+    );
+
+    const variableDeclaration = ts.factory.createVariableDeclaration(variableName, undefined, undefined, hookExpression);
+    const variableDeclarationList = ts.factory.createVariableDeclarationList([variableDeclaration], ts.NodeFlags.Const);
+
+    const variableStatement = ts.factory.createVariableStatement(undefined, variableDeclarationList);
+    let declarationString = printer.printNode(ts.EmitHint.Unspecified, variableStatement, sourceFile!);
+
+    return {
+        text: '\n' + declarationString + '\n',
+        variableStatement
+    }
+}
+
+
+
 const findSymbolExportInfo = (symbol: ts.Symbol): ModuleInfo | undefined => {
     const declarations = symbol.getDeclarations();
 
@@ -1419,6 +1439,86 @@ const findSymbolExportInfo = (symbol: ts.Symbol): ModuleInfo | undefined => {
     return undefined;
 }
 
+export const findScopedVariable = (variableName: string, scope: Scope.Scope) => {
+    let current: Scope.Scope | null = scope;
+    while (current) {
+        const found = current.variables.find(v => v.name === variableName);
+        if(found) return found;
+
+        current = current!.upper
+    }
+
+
+}
 
 export const SetStateTypeStringPattern = /Dispatch<SetStateAction<.*>>/
 export const RefPattern = /(RefObject|MutableRefObject)<.*>/
+export type MutableArray<T extends readonly any[]> = T extends readonly (infer R)[] ? R[] : T;
+export const createRule = ESLintUtils.RuleCreator(
+    name => `https://example.com/rule/${name}`,
+);
+
+
+export const transformFunctionWithNonBlockStatement = (
+    fnNode: TSESTree.ArrowFunctionExpression,
+    tsService: TsService,
+    additionalVariableStatement: ts.VariableStatement,
+) => {
+    const fnCompNode = tsService.esTreeNodeToTSNodeMap.get(fnNode);
+    const bodyNode = tsService.esTreeNodeToTSNodeMap.get(fnNode.body);
+
+    const returnSt = ts.factory.createReturnStatement(bodyNode as ts.JsxElement);
+
+
+    return ts.factory.createArrowFunction(
+        fnCompNode.modifiers?.map(modifier => ts.factory.createModifier(modifier.kind)),
+        fnCompNode.typeParameters,
+        fnCompNode.parameters,
+        fnCompNode.type,
+        undefined,
+        ts.factory.createBlock([
+            additionalVariableStatement,
+            returnSt
+        ], true)
+    );
+};
+
+export const getPositionBetweenReturnAndSymbols = (
+    body: TSESTree.BlockStatement,
+    symbols: ts.Symbol[],
+    tsService: TsService,
+) => {
+    let defaultIndent = 0;
+    let end = 0;
+
+    const returnSt = body.body.find(st => (st.type === AST_NODE_TYPES.ReturnStatement || st.type === AST_NODE_TYPES.ExpressionStatement));
+    if (returnSt) {
+        end = returnSt.range[0];
+        defaultIndent = returnSt.loc.start.column;
+    } else {
+        end = body.range[1];
+        defaultIndent = body.body[0]?.loc.start.column ?? 2;
+    }
+
+
+    const {
+        end: insertPosition,
+        indent
+    } = symbols.reduce((info, symbol) => {
+        const _pos = (symbol.valueDeclaration!).end;
+        const parent = findParentNode(tsService.tsNodeToESTreeNodeMap.get(symbol.valueDeclaration!), [AST_NODE_TYPES.FunctionDeclaration, AST_NODE_TYPES.VariableDeclaration, AST_NODE_TYPES.ClassDeclaration]);
+
+
+        if (info.end < _pos) {
+            return {end: (parent?.range[1] ?? 0) + 1, indent: parent?.loc.start.column ?? 0}
+        }
+
+        return info;
+    }, {end, indent: defaultIndent});
+
+
+    return {
+        insertPosition,
+        indent
+    }
+}

@@ -7,7 +7,7 @@ import ReactNoInlineLiterals from '../index.ts';
 import path from 'path';
 import * as test from 'bun:test';
 import fs from 'fs';
-import {getTestData} from "../utils.ts";
+import {getTestData} from "../../utils.ts";
 
 
 RuleTester.afterAll = test.afterAll;

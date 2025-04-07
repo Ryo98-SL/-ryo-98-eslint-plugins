@@ -2,7 +2,7 @@ import eslint from "eslint";
 import tslint from "typescript-eslint";
 import eslintjs from "@eslint/js";
 import ReactNoInlineLiterals from "../index.ts";
-import {getTestData} from "../utils.ts";
+import {getTestData} from "../../utils.ts";
 import {fileURLToPath} from "node:url";
 import path from "path";
 import * as parser from '@typescript-eslint/parser';
@@ -36,12 +36,13 @@ const linter = new eslint.ESLint({
                 'react-pref-autofix': ReactNoInlineLiterals
             },
             rules: {
-                'react-pref-autofix/no-inline-literal-object': ['warn', ReactNoInlineLiterals.rules["no-inline-literal-object"].defaultOptions[0]]
+                'react-pref-autofix/no-inline-literal-object': ['warn', ReactNoInlineLiterals.rules["no-inline-literal-object"].defaultOptions[0]],
+                'react-pref-autofix/auto-create-ref': ['warn']
             }
 
         })});
 
-const {content: testFileContents, fixPath} = getTestData(2)
+const {content: testFileContents, fixPath} = getTestData(1)
 
 fs.writeFileSync(fixPath, testFileContents[0]);
 

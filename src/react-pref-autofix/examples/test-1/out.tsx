@@ -12,14 +12,14 @@ function NoInlineLiteralObject() {
     
     const boxStyle = useMemo<CSSProperties | undefined>(() => { return { width: _width }; }, [_width]);
     
-    const modalOnClick = useCallback<OnClickType>(({ count }) => {
+    const handleModalClick = useCallback<OnClickType>(({ count }) => {
         console.log("=>(in.tsx:17) count", count);
     }, []);
     console.log('width', width);
     return <div style={{height: '3px', backgroundColor, width: _width}}>
         <Box style={boxStyle}></Box>
         <Modal info={ModalInfo}
-               onClick={modalOnClick}/>
+               onClick={handleModalClick}/>
         <div style={{width}}></div>
     </div>
 }

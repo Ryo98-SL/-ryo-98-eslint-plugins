@@ -6,8 +6,8 @@ interface DialogProps {
     onClose?: () => void;
 }
 
-interface DialogAPI {
-
+export interface DialogAPI {
+    work: () => boolean;
 }
 
 
