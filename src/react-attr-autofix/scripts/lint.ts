@@ -42,7 +42,7 @@ const linter = new eslint.ESLint({
 
         })});
 
-const {content: testFileContents, fixPath} = getTestData(1)
+const {content: testFileContents, fixPath} = getTestData(3)
 
 fs.writeFileSync(fixPath, testFileContents[0]);
 

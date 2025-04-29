@@ -16,7 +16,7 @@ interface ModalProps {
     info?: ModalInfoType;
     list?: ListDataArrayAlias;
     onClick?: OnClickType;
-
+    onClose?: () => void;
     pattern?: RegExp;
 }
 

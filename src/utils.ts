@@ -318,7 +318,7 @@ type MapNodeWithTypes<T extends AST_NODE_TYPES | (readonly AST_NODE_TYPES[])> = 
 /**
  * Find JSX element that owns the attribute
  */
-export const findParentNode = <T extends AST_NODE_TYPES | readonly AST_NODE_TYPES[]>(node: TSESTree.Node, types: T): MapNodeWithTypes<T> | null => {
+export const findParentNode = <T extends AST_NODE_TYPES | readonly AST_NODE_TYPES[]>(node: TSESTree.Node, types: T, shouldContinue?: (current: TSESTree.Node) => any): MapNodeWithTypes<T> | null => {
     let current: TSESTree.Node | null = node;
 
     let _types: readonly AST_NODE_TYPES[];
@@ -328,7 +328,7 @@ export const findParentNode = <T extends AST_NODE_TYPES | readonly AST_NODE_TYPE
         _types = types
     }
 
-    while (current && !_types.includes(current.type)) {
+    while (current && (!_types.includes(current.type) || (shouldContinue && shouldContinue(current)) )) {
         current = current.parent || null;
     }
 
@@ -356,13 +356,7 @@ export const findStartInsertPosition = (programNode: any): number => {
  */
 export const findEndInsertPosition = (programNode: any): number => programNode.range[1];
 
-/**
- * Generate PascalCase variable name based on component and property names
- * @param componentName - Component name
- * @param propName - Property name
- * @param existingConstants - Map of existing constants
- * @returns Generated variable name
- */
+
 export const generateVariableName = (
     sourceNode: TSESTree.Node,
     tsService: TsService,
@@ -398,7 +392,7 @@ export const generateVariableName = (
     let count = 1;
 
     while (scopedVariables.includes(finalName)) {
-        finalName = `${baseName}${count}`;
+        finalName = `${finalName}${count}`;
         count++;
     }
 

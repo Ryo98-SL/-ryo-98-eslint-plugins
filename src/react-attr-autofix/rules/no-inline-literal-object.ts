@@ -15,7 +15,7 @@ import {
     getMemoCallbackHookDeclarationText, getPositionBetweenReturnAndSymbols,
     getTypeNodeForProp,
     type ImportUpdateResult,
-    injectWithImport,
+    injectWithImport, isNodeDescendant,
     mergeImportUpdateResults,
     MutableArray,
     processIgnoredComponentsConfig,
@@ -188,20 +188,48 @@ export const noInlineLiteralObjectRule = createRule({
                 const tsExpression = tsService.esTreeNodeToTSNodeMap.get(expression) as ts.FunctionExpression | ts.ObjectLiteralExpression;
 
 
-                const functionComponentNode = findParentNode(expression.parent, [AST_NODE_TYPES.FunctionExpression, AST_NODE_TYPES.FunctionDeclaration, AST_NODE_TYPES.ArrowFunctionExpression]);
+                const functionComponentNode = findParentNode(expression.parent, [
+                    AST_NODE_TYPES.FunctionExpression,
+                    AST_NODE_TYPES.FunctionDeclaration,
+                    AST_NODE_TYPES.ArrowFunctionExpression
+                ], (current) => {
+                    if(current.parent) {
+                        const expContainer = findParentNode(current.parent, [AST_NODE_TYPES.JSXExpressionContainer]);
+                        return !!expContainer;
+                    }
+                    
+                    
+                    return false;
+                });
+                
                 if (!functionComponentNode) {
                     // not in FC, unnecessary apply the rule.
                     return;
                 }
                 const references = findReferenceUsagesInScope(tsService, expression);
-
+                
+                
+                let isUsingMapCallbackArguments = false;
                 const componentScopedReferences = Array.from(references.values()).filter(s => {
-                    if (!s.valueDeclaration) return false;
+                    if (!s.valueDeclaration || isUsingMapCallbackArguments) return false;
                     const symbolNode = tsService.tsNodeToESTreeNodeMap.get(s.valueDeclaration!);
 
                     const foundFunctionNode = findParentNode(symbolNode, [AST_NODE_TYPES.FunctionDeclaration, AST_NODE_TYPES.ArrowFunctionExpression]);
+                    
+                    if(foundFunctionNode){
+                        isUsingMapCallbackArguments = isNodeDescendant(
+                            tsService.esTreeNodeToTSNodeMap.get(foundFunctionNode),
+                            tsService.esTreeNodeToTSNodeMap.get(functionComponentNode)
+                        )
+                    }
+                    
                     return foundFunctionNode === functionComponentNode;
-                })
+                });
+                
+                if(isUsingMapCallbackArguments) {
+                    // is in map callback and using a argument of callback. like: { textList.map((text) => <div key={text} onClick=() => { console.log(text) } >...</div>) }
+                    return;
+                }
 
                 const scenes = new Set<FixScene>();
                 if (componentScopedReferences.length) {
