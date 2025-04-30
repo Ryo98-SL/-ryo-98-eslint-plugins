@@ -1,34 +1,28 @@
 import {
     addIndentationToEachLine,
     analyzeTypeAndCreateImports,
-    createImport,
     createRule,
-    findEndInsertPosition,
-    findParentNode,
     findReferenceUsagesInScope,
-    findStartInsertPosition,
-    FixScene,
     generateVariableName,
     getComponentName,
-    getComponentNameFromClassName,
-    getConstDeclarationText,
-    getMemoCallbackHookDeclarationText, getPositionBetweenReturnAndSymbols,
+    getComponentNameFromClassName, getConstDeclarationText,
+    getMemoCallbackHookDeclarationText,
     getTypeNodeForProp,
-    type ImportUpdateResult,
-    injectWithImport, isNodeDescendant,
-    mergeImportUpdateResults,
-    MutableArray,
+    isNodeDescendant,
     processIgnoredComponentsConfig,
     RefPattern,
-    RegExpConfig,
-    SetStateTypeStringPattern,
-    shouldIgnoreComponent, transformFunctionWithNonBlockStatement
-} from "../../utils.ts";
+    SetStateTypeStringPattern
+} from "../../utils";
 import {AST_NODE_TYPES, ESLintUtils} from "@typescript-eslint/utils";
 import ts, {EmitHint} from "typescript";
 import path from "path";
 import type {RuleFix} from "@typescript-eslint/utils/ts-eslint";
 import {TSESTree} from "@typescript-eslint/typescript-estree";
+import {shouldIgnoreComponent} from "../../utils";
+import {FixScene, ImportUpdateResult, MutableArray, RegExpConfig} from "../../utils";
+import {getPositionBetweenReturnAndSymbols, transformFunctionWithNonBlockStatement} from "../../utils";
+import {findEndInsertPosition, findParentNode, findStartInsertPosition} from "../../utils";
+import {createImport, injectWithImport, mergeImportUpdateResults} from "../../utils";
 
 export interface PluginOptions {
     typeDefinitions?: boolean;
@@ -140,7 +134,9 @@ export const noInlineLiteralObjectRule = createRule({
         const tsService = ESLintUtils.getParserServices(context);
         const tsChecker = tsService.program.getTypeChecker();
         const sourceFile = tsService.program.getSourceFile(context.filename);
-        const scopeManager = context.sourceCode.scopeManager!
+        const scopeManager = context.sourceCode.scopeManager!;
+        const sourceCode = context.sourceCode;
+
         const printer = ts.createPrinter();
         return {
             // Detect object literals in JSX attributes
@@ -165,7 +161,6 @@ export const noInlineLiteralObjectRule = createRule({
                 ) {
                     return;
                 }
-
 
                 const jsxElement = node.parent;
                 let componentName = getComponentName(jsxElement);
@@ -206,6 +201,7 @@ export const noInlineLiteralObjectRule = createRule({
                     // not in FC, unnecessary apply the rule.
                     return;
                 }
+
                 const references = findReferenceUsagesInScope(tsService, expression);
                 
                 
@@ -227,7 +223,7 @@ export const noInlineLiteralObjectRule = createRule({
                 });
                 
                 if(isUsingMapCallbackArguments) {
-                    // is in map callback and using a argument of callback. like: { textList.map((text) => <div key={text} onClick=() => { console.log(text) } >...</div>) }
+                    // is in map callback and using an argument of callback. like: { textList.map((text) => <div key={text} onClick=() => { console.log(text) } >...</div>) }
                     return;
                 }
 

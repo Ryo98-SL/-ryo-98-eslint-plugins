@@ -1,24 +1,18 @@
 import {
     addIndentationToEachLine,
-    analyzeTypeAndCreateImports, createImport,
-    createRule,
-    findParentNode,
-    findScopedVariable,
-    getComponentName,
-    getMemoCallbackHookDeclarationText,
-    getPositionBetweenReturnAndSymbols,
-    getRefHookDeclarationText,
-    getTypeNodeForProp,
-    type ImportUpdateResult,
-    injectWithImport,
-    mergeImportUpdateResults,
-    transformFunctionWithNonBlockStatement
-} from "../../utils.ts";
+    analyzeTypeAndCreateImports,
+    createRule, getComponentName, getRefHookDeclarationText,
+    getTypeNodeForProp
+} from "../../utils";
 import {AST_NODE_TYPES, ESLintUtils} from "@typescript-eslint/utils";
 import {RuleFix} from "@typescript-eslint/utils/ts-eslint";
 import ts, {EmitHint, TypeFlags} from "typescript";
 import path from "path";
 import {TSESTree} from "@typescript-eslint/typescript-estree";
+import {ImportUpdateResult} from "../../utils/types.ts";
+import {getPositionBetweenReturnAndSymbols, transformFunctionWithNonBlockStatement} from "../../utils";
+import {findParentNode, findScopedVariable} from "../../utils";
+import {createImport, injectWithImport, mergeImportUpdateResults} from "../../utils";
 
 
 export const autoCreateRefRule = createRule({
@@ -60,8 +54,8 @@ export const autoCreateRefRule = createRule({
 
                 const refScope = sourceCode.getScope(expression);
                 const found = findScopedVariable(expression.name, refScope);
+
                 if (found) {
-                    console.log("=>(auto-create-ref.ts:37) found");
                     return;
                 }
 
@@ -150,9 +144,6 @@ export const autoCreateRefRule = createRule({
                     }
                 });
 
-
-
-                console.log("=>(auto-create-ref.ts:39) not found", expression.name);
             }
         }
     }

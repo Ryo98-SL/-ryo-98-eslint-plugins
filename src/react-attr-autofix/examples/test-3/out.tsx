@@ -6,6 +6,8 @@ function MyComponent() {
 
     const [size, setSize] = useState(10);
     const [message, setMessage] = useState('firstOne')
+    const [id, setId] = useState('one')
+    
     
     
     const doYourJob = useCallback(() => {
