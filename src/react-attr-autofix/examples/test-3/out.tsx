@@ -1,4 +1,4 @@
-import ListDataArrayAlias, { OnClickType, ModalInfoType, Modal } from "./../modal.tsx";
+import ListDataArrayAlias, { ModalInfoType, Modal } from "./../modal.tsx";
 import { useCallback, useMemo, useState } from "react";
 
 
@@ -32,13 +32,15 @@ function MyComponent() {
     
     const modalList = useMemo<ListDataArrayAlias | undefined>(() => { return [{ id: 'second', message }]; }, [message]);
     
-    const handleModalClick = useCallback<OnClickType>((e) => {
+    const handleModalClick = useCallback<(Parameters<typeof Modal>[0]["onClick"]) & Function>((e) => {
         doYourJob();
-        handleYourDuty('Man!');
-        console.log("=>(in.tsx:14) e.count", e.count, size);
-    }, [doYourJob, handleYourDuty, size]);
+        // handleYourDuty('Man!');
+        // console.log("=>(in.tsx:14) e.count", e.count, size);
+    }, [doYourJob]);
     return <>
-        <Modal info={modalInfo} list={modalList} onClick={handleModalClick}
+        <Modal info={modalInfo}
+               list={modalList}
+               onClick={handleModalClick}
                
         />
         {

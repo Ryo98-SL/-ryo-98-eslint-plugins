@@ -5,7 +5,6 @@ import {resolveModulePath} from "./resolve-module-path.ts";
 import path from "path";
 import {ScopeManager} from "@typescript-eslint/scope-manager";
 import {findSymbolExportInfo} from "./pin.ts";
-import {getModuleInfoFromType} from "./module-info.ts";
 
 /**
  * 为指定的具名值创建导入声明
@@ -247,6 +246,7 @@ export function analyzeTypeAndCreateImports(
 
     // Recursive function to analyze types and collect imports
     function collectTypesToImport(type: ts.Type, visited = new Set<ts.Type>()) {
+
         if (visited.has(type)) return;
         visited.add(type);
 
@@ -256,11 +256,7 @@ export function analyzeTypeAndCreateImports(
         if (symbol && (!tsChecker.isArrayType(type) || type.aliasSymbol)) {
 
             let moduleInfo: ModuleInfo | undefined;
-            if (type.aliasSymbol) {
-                moduleInfo = findSymbolExportInfo(type.aliasSymbol);
-            } else {
-                moduleInfo = getModuleInfoFromType(type, tsService, tsChecker);
-            }
+            moduleInfo = findSymbolExportInfo(type.aliasSymbol || type.symbol);
 
             if (moduleInfo && moduleInfo.moduleName && moduleInfo.moduleName !== sourceFile.fileName && moduleInfo.moduleName !== 'typescript') {
 

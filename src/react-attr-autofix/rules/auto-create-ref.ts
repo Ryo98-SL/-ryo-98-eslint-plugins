@@ -62,7 +62,7 @@ export const autoCreateRefRule = createRule({
                 const jsxElement = node.parent;
                 let componentName = getComponentName(jsxElement);
 
-                const typeAnnotation = getTypeNodeForProp(
+                const resolvedCompPropTypeInfo = getTypeNodeForProp(
                     node,
                     'ref',
                     componentName,
@@ -75,11 +75,11 @@ export const autoCreateRefRule = createRule({
 
 
 
-                if(!typeAnnotation) return;
+                if(!resolvedCompPropTypeInfo) return;
 
                 // get type argument "T" specified type of Ref<T>
                 //@ts-ignore
-                const [typeArgument] = (typeAnnotation.origin as ts.UnionType).types.filter(t => !(t.flags & TypeFlags.Undefined) && !(t.flags & TypeFlags.Null));
+                const [typeArgument] = (resolvedCompPropTypeInfo.type.origin as ts.UnionType).types.filter(t => !(t.flags & TypeFlags.Undefined) && !(t.flags & TypeFlags.Null));
 
                 if (!typeArgument) {
                     return;

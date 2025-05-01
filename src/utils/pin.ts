@@ -73,6 +73,8 @@ export const findStartInsertPosition = (programNode: any): number => {
  * @returns Insert position
  */
 export const findEndInsertPosition = (programNode: any): number => programNode.range[1];
+
+
 export const findSymbolExportInfo = (symbol: ts.Symbol): ModuleInfo | undefined => {
     const declarations = symbol.getDeclarations();
 

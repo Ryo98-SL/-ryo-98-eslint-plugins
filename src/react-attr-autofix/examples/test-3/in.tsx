@@ -28,10 +28,12 @@ function MyComponent() {
 
     
     return <>
-        <Modal info={{size}} list={[{id: 'second', message}]} onClick={(e) => {
+        <Modal info={{size}}
+               list={[{id: 'second', message}]}
+               onClick={(e) => {
                    doYourJob();
-                   handleYourDuty('Man!');
-                   console.log("=>(in.tsx:14) e.count", e.count, size);
+                   // handleYourDuty('Man!');
+                   // console.log("=>(in.tsx:14) e.count", e.count, size);
                }}
                
         />

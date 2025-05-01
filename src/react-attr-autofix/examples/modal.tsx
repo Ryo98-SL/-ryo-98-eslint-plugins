@@ -2,7 +2,7 @@ import {forwardRef, memo} from "react";
 
 
 export interface ModalInfoType  {size: number };
-export type OnClickType = (e: { count: number }) => void;
+type OnClickType = (e: { count: number }) => void;
 export interface ListData {
     id: string;
     message: string;
@@ -15,7 +15,7 @@ export default ListDataArrayAlias;
 interface ModalProps {
     info?: ModalInfoType;
     list?: ListDataArrayAlias;
-    onClick?: OnClickType;
+    onClick?: OnClickType | number | null;
     onClose?: () => void;
     pattern?: RegExp;
 }
@@ -30,3 +30,5 @@ export const Modal = memo(forwardRef<ModalAPI, ModalProps>
 
     return <></>
 }))
+
+

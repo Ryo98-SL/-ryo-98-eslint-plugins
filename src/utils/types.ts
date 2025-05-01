@@ -47,3 +47,4 @@ export interface ImportUpdateResult {
 
 export type FixScene = 'top-level-constant' | 'hook';
 export type MutableArray<T extends readonly any[]> = T extends readonly (infer R)[] ? R[] : T;
+export type ResolvedCompPropTypeInfo = { type: ts.Type, propsType: ts.Type };

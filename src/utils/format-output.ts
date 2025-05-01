@@ -69,12 +69,16 @@ export const transformFunctionWithNonBlockStatement = (
 export const getConstDeclarationText = (
     tsExpression: ts.FunctionExpression | ts.ObjectLiteralExpression,
     variableName: string,
-    type: ts.Type | undefined | null,
+    type: ts.Type | ts.TypeNode | undefined | null,
     printer: ts.Printer,
     sourceFile: ts.SourceFile | undefined,
     tsChecker: ts.TypeChecker) => {
 
-    const typeNode = type ? tsChecker.typeToTypeNode(type, undefined, undefined) : undefined;
+    const typeNode = type
+        ? 'getSourceFile' in type
+            ? type
+            : tsChecker.typeToTypeNode(type, undefined, undefined)
+        : undefined;
 
     const variableDeclaration = ts.factory.createVariableDeclaration(variableName, undefined, typeNode, tsExpression);
 
@@ -91,22 +95,25 @@ export const getMemoCallbackHookDeclarationText = (
     hookName: string,
     tsExpression: ts.FunctionExpression | ts.ObjectLiteralExpression,
     variableName: string,
-    type: ts.Type | undefined | null,
+    type: ts.Type | ts.TypeNode | undefined | null,
     references: ts.Symbol[],
     printer: ts.Printer,
     sourceFile: ts.SourceFile | undefined,
     tsChecker: ts.TypeChecker
 ) => {
 
+    let typeNode: ts.TypeNode | undefined;
 
-    let typeNode: ts.TypeNode | undefined = undefined;
-
-    if (type?.isUnion() && hookName === 'useCallback') {
-        const types = type.types.filter(_type => !!_type.getCallSignatures().length);
-
-        typeNode = ts.factory.createUnionTypeNode(types.map(t => tsChecker.typeToTypeNode(t, undefined, undefined)).filter(t => !!t));
+    if(type && 'getSourceFile' in type) {
+       typeNode = type;
     } else {
-        typeNode = type ? tsChecker.typeToTypeNode(type, undefined, undefined) : undefined;
+        if (type?.isUnion() && hookName === 'useCallback') {
+            const types = type.types.filter(_type => !!_type.getCallSignatures().length);
+
+            typeNode = ts.factory.createUnionTypeNode(types.map(t => tsChecker.typeToTypeNode(t, undefined, undefined)).filter(t => !!t));
+        } else {
+            typeNode = type ? tsChecker.typeToTypeNode(type, undefined, undefined) : undefined;
+        }
     }
 
     const identifier = ts.factory.createIdentifier(hookName);

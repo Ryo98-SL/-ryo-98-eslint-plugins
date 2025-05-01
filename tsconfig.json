@@ -25,5 +25,5 @@
     "noPropertyAccessFromIndexSignature": false,
   },
 
-  "exclude": ["node_modules", "dist","**/*.txt", "**/*.json"]
+  "exclude": ["dist","**/*.txt", "**/*.json"]
 }

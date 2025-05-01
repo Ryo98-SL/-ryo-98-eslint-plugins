@@ -1,28 +1,40 @@
 import {
     addIndentationToEachLine,
     analyzeTypeAndCreateImports,
+    createImport,
     createRule,
+    findEndInsertPosition,
+    findParentNode,
     findReferenceUsagesInScope,
+    findStartInsertPosition,
+    FixScene,
     generateVariableName,
     getComponentName,
-    getComponentNameFromClassName, getConstDeclarationText,
+    getComponentNameFromClassName,
+    getConstDeclarationText,
     getMemoCallbackHookDeclarationText,
+    getPositionBetweenReturnAndSymbols,
     getTypeNodeForProp,
+    ImportUpdateResult,
+    injectWithImport,
     isNodeDescendant,
+    mergeImportUpdateResults,
+    MutableArray,
     processIgnoredComponentsConfig,
     RefPattern,
-    SetStateTypeStringPattern
+    RegExpConfig,
+    SetStateTypeStringPattern,
+    shouldIgnoreComponent,
+    transformFunctionWithNonBlockStatement
 } from "../../utils";
 import {AST_NODE_TYPES, ESLintUtils} from "@typescript-eslint/utils";
 import ts, {EmitHint} from "typescript";
 import path from "path";
 import type {RuleFix} from "@typescript-eslint/utils/ts-eslint";
 import {TSESTree} from "@typescript-eslint/typescript-estree";
-import {shouldIgnoreComponent} from "../../utils";
-import {FixScene, ImportUpdateResult, MutableArray, RegExpConfig} from "../../utils";
-import {getPositionBetweenReturnAndSymbols, transformFunctionWithNonBlockStatement} from "../../utils";
-import {findEndInsertPosition, findParentNode, findStartInsertPosition} from "../../utils";
-import {createImport, injectWithImport, mergeImportUpdateResults} from "../../utils";
+
+import {getExtractType} from "../../utils/resolve-type.ts";
+
 
 export interface PluginOptions {
     typeDefinitions?: boolean;
@@ -145,7 +157,6 @@ export const noInlineLiteralObjectRule = createRule({
                 if (node.value.type !== AST_NODE_TYPES.JSXExpressionContainer) return;
 
                 const expressionType = node.value.expression.type;
-
                 if (
                     (expressionType !== AST_NODE_TYPES.ObjectExpression) &&
                     (expressionType !== AST_NODE_TYPES.CallExpression || !options.checkReturnValueOfCalling) &&
@@ -248,7 +259,7 @@ export const noInlineLiteralObjectRule = createRule({
                     }
                 }
 
-                const typeAnnotation = getTypeNodeForProp(
+                const resolvedTypeInfo = getTypeNodeForProp(
                     node,
                     propName,
                     componentName,
@@ -269,11 +280,17 @@ export const noInlineLiteralObjectRule = createRule({
                 }
 
 
-                if (typeAnnotation && sourceFile) {
-                    const importUpdates = analyzeTypeAndCreateImports(typeAnnotation, tsService, tsChecker, sourceFile, tsService.program, scopeManager);
+                let attrType: ts.Type | ts.TypeNode | undefined = resolvedTypeInfo?.type;
+
+                if (resolvedTypeInfo && sourceFile) {
+                    const importUpdates = analyzeTypeAndCreateImports(resolvedTypeInfo.type, tsService, tsChecker, sourceFile, tsService.program, scopeManager);
                     pushImport(importUpdates)
                 }
 
+                // if unable to import the attr type, will use type extraction;
+                if(!importUpdateResults.length && resolvedTypeInfo) {
+                    attrType = getExtractType(componentName, propName, attrType, hookName, resolvedTypeInfo, tsService, tsChecker);
+                }
 
                 console.log("=>(index.ts:203) importUpdateResults", importUpdateResults.length, '\n\n');
                 const programNode = context.sourceCode.ast;
@@ -303,13 +320,10 @@ export const noInlineLiteralObjectRule = createRule({
 
                         fixes.push(fixer.replaceText(expression, variableName));
 
-
-
                         const noConsistReferences = componentScopedReferences.filter(ref => {
                             const refType = tsChecker.getTypeOfSymbol(ref);
                             const isSetStateFunction = SetStateTypeStringPattern.test(tsChecker.typeToString(refType));
                             const isRefObject = RefPattern.test(tsChecker.typeToString(refType));
-
 
                             return !isSetStateFunction && !isRefObject
                         });
@@ -318,7 +332,7 @@ export const noInlineLiteralObjectRule = createRule({
                             hookName,
                             tsExpression,
                             variableName,
-                            typeAnnotation,
+                            attrType,
                             noConsistReferences,
                             printer,
                             sourceFile,
@@ -381,7 +395,7 @@ export const noInlineLiteralObjectRule = createRule({
                             ? findStartInsertPosition(programNode)
                             : findEndInsertPosition(programNode);
 
-                        const {text: declarationText} = getConstDeclarationText(tsExpression, variableName, typeAnnotation, printer, sourceFile, tsChecker);
+                        const {text: declarationText} = getConstDeclarationText(tsExpression, variableName, attrType, printer, sourceFile, tsChecker);
 
                         if (declarationsPosition === "start") {
                             const insertAfterNode = context.sourceCode.getNodeByRangeIndex(insertPosition);
@@ -398,7 +412,6 @@ export const noInlineLiteralObjectRule = createRule({
 
 
                         return fixes;
-
                     };
 
                     suggestList.push({
@@ -408,7 +421,6 @@ export const noInlineLiteralObjectRule = createRule({
 
                         }
                     );
-
 
                 }
 

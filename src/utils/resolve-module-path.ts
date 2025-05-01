@@ -20,3 +20,12 @@ export const resolveModulePath = (moduleName: string, program: ts.Program): stri
 
     return resolved.resolvedModule?.resolvedFileName;
 };
+
+export const getReactSourceFile = (program: ts.Program) => {
+    const reactTypesPath = resolveModulePath('react', program);
+    if(reactTypesPath) {
+        const sourceFile = program.getSourceFile(reactTypesPath);
+
+        return sourceFile;
+    }
+}

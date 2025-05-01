@@ -1,9 +1,7 @@
 import {AST_NODE_TYPES, type TSESTree} from "@typescript-eslint/typescript-estree";
-
-
 import ts, {SyntaxKind} from 'typescript';
-import {resolveModulePath} from "./resolve-module-path.ts";
-import {TsService, TypedRuleContext} from "./types.ts";
+import {getReactSourceFile, resolveModulePath} from "./resolve-module-path.ts";
+import {ResolvedCompPropTypeInfo, TsService, TypedRuleContext} from "./types.ts";
 import {findIntrinsicElementsInterface, findParentNode} from "./pin.ts";
 
 
@@ -20,8 +18,8 @@ const getTypeFromTsCompiler = (
     propName: string,
     tsService: TsService | null,
     filename: string
-): ts.Type | null => {
-    let thatType: ts.Type | null = null;
+): ResolvedCompPropTypeInfo | null => {
+    let thatType: ResolvedCompPropTypeInfo | null = null;
 
     if (!tsService) return thatType;
 
@@ -36,31 +34,27 @@ const getTypeFromTsCompiler = (
                 if (jsxElement.openingElement.name.type === AST_NODE_TYPES.JSXIdentifier) {
                     const tagName = jsxElement.openingElement.name.name;
                     if(tagName.match(/^[a-z]/)) {
+                        const sourceFile = getReactSourceFile(tsService.program);
+                        if (sourceFile) {
+                            const IntrinsicElements = findIntrinsicElementsInterface(sourceFile, tsChecker);
+                            const propertySignature = IntrinsicElements?.members.find(member => {
+                                if (member.kind === SyntaxKind.PropertySignature && member.name) {
+                                    return member.name.getText() === tagName
+                                }
+                            });
 
-
-                        const reactTypesPath = resolveModulePath('react', tsService.program);
-                        if (reactTypesPath) {
-                            const sourceFile = tsService.program.getSourceFile(reactTypesPath);
-                            if (sourceFile) {
-                                const IntrinsicElements = findIntrinsicElementsInterface(sourceFile, tsChecker);
-                                const propertySignature = IntrinsicElements?.members.find(member => {
-                                    if (member.kind === SyntaxKind.PropertySignature && member.name) {
-                                        return member.name.getText() === tagName
-                                    }
+                            if (ts.isPropertySignature(propertySignature!) && propertySignature.type) {
+                                const propSymbol = tsChecker.getTypeAtLocation(propertySignature.type).getProperties().find(prop => {
+                                    return prop.name === propName
                                 });
 
-                                if (ts.isPropertySignature(propertySignature!) && propertySignature.type) {
-                                    const propSymbol = tsChecker.getTypeAtLocation(propertySignature.type).getProperties().find(prop => {
-                                        return prop.name === propName
-                                    });
 
+                                const propType = tsChecker.getTypeOfSymbol(propSymbol!);
 
-                                    const propType = tsChecker.getTypeOfSymbol(propSymbol!);
-
-
-
-                                    thatType = propType;
-                                }
+                                thatType = {
+                                    propsType: tsChecker.getTypeFromTypeNode(propertySignature.type),
+                                    type: propType
+                                };
                             }
                         }
                     } else {
@@ -88,23 +82,10 @@ const getTypeFromTsCompiler = (
                                         // 查找特定属性
                                         const property = propsType.getProperty(propName);
                                         if (property) {
-                                            thatType = tsChecker.getTypeOfSymbol(property);
-                                            console.log('& union',thatType.flags & ts.TypeFlags.Union);
-
-                                            console.log('check type:', tsChecker.typeToString(
-                                                thatType
-                                            ))
-
-                                            if(thatType.flags & ts.TypeFlags.Union) {
-                                                (thatType as ts.UnionType).types.forEach((subType) => {
-                                                    console.log('!!subType.symbol.valueDeclaration', tsChecker.typeToString(
-                                                            subType
-                                                        )
-                                                        , !!subType.symbol?.valueDeclaration)
-                                                })
-                                            }
-
-
+                                            thatType = {
+                                                type: tsChecker.getTypeOfSymbol(property),
+                                                propsType: propsType
+                                            };
                                         }
                                     }
                                 }
@@ -151,7 +132,7 @@ export const getTypeNodeForProp = (
     tsService: TsService | null,
     filename: string,
     context:  TypedRuleContext
-): ts.Type | null => {
+): ResolvedCompPropTypeInfo | null => {
     // If not a TypeScript file or no type definitions needed, return empty string
     if (!isTypeScriptFile || !shouldAddTypes) {
         return null;
@@ -263,6 +244,27 @@ const isTypeUsable = (
 };
 
 
+export const typeFlagsIntersectionInfo = (flags: ts.TypeFlags) => {
+    const decimalReg = /^\d/;
+    const array = Object.entries(ts.TypeFlags)
+        .filter(([flagName]) => {
+            return !decimalReg.test(flagName)
+        })
+        .map(([flagName, flag]) => {
+
+        return [ flagName, ((flag as number) & flags) !== 0 ];
+    })
+        .reduce(( parts ,[flagName, result]) => {
+            parts[result ? 'intersect' : 'excludes'].push(flagName as unknown as ts.TypeFlags);
+
+            return parts;
+        }, { intersect: [], excludes: [] } as { intersect: ts.TypeFlags[], excludes: ts.TypeFlags[] })
+
+    return array;
+
+}
+
+
 
 export const SetStateTypeStringPattern = /Dispatch<SetStateAction<.*>>/
 export const RefPattern = /(RefObject|MutableRefObject)<.*>/
@@ -273,5 +275,4 @@ export * from './format-output.ts';
 export * from './types.ts';
 export * from './process-config.ts';
 export * from './resolve-imports.ts';
-export * from './module-info.ts';
 export * from './test.ts';

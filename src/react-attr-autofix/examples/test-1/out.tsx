@@ -1,5 +1,5 @@
-import { useCallback, CSSProperties, useState, useRef, useEffect, useMemo } from "react";
-import { ModalInfoType, OnClickType, Modal } from "./../modal.tsx";
+import { useCallback, useMemo, useState, useRef, useEffect } from "react";
+import { ModalInfoType, Modal } from "./../modal.tsx";
 
 const width = '1px';
 const size = 10;
@@ -10,9 +10,9 @@ function NoInlineLiteralObject() {
 
     const {z2: _width} = { z2: 2};
     
-    const boxStyle = useMemo<CSSProperties | undefined>(() => { return { width: _width }; }, [_width]);
+    const boxStyle = useMemo<Parameters<typeof Box>[0]["style"]>(() => { return { width: _width }; }, [_width]);
     
-    const handleModalClick = useCallback<OnClickType>(({ count }) => {
+    const handleModalClick = useCallback<Parameters<typeof Modal>[0]["onClick"] & (Function)>(({ count }) => {
         console.log("=>(in.tsx:17) count", count);
     }, []);
     console.log('width', width);
