@@ -1,10 +1,15 @@
+import {Modal} from "../modal.tsx";
 
 
 const MyFc = () => {
 
-    return <SimpleFc onDispose={() => {
-        console.log('Dispose');
-    }} />
+    return <>
+        <SimpleFc onDispose={() => {
+            console.log('Dispose');
+        }} />
+
+        <Modal pattern={/\d/}  onClose={() => { console.log('Modal closed'); } }/>
+    </>
 }
 
 

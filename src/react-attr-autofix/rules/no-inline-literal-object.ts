@@ -185,6 +185,7 @@ export const noInlineLiteralObjectRule = createRule({
                     || expressionType === AST_NODE_TYPES.NewExpression
                     || expressionType === AST_NODE_TYPES.CallExpression
                     || expressionType === AST_NODE_TYPES.MemberExpression
+                    || expressionType === AST_NODE_TYPES.Literal
                 ) ? 'useMemo' : 'useCallback';
 
                 const propName = node.name.name as string;
@@ -419,8 +420,7 @@ export const noInlineLiteralObjectRule = createRule({
                             data: {name: variableName},
                             fix: fixFn
 
-                        }
-                    );
+                        });
 
                 }
 
