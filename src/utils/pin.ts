@@ -92,7 +92,14 @@ export const findSymbolExportInfo = (symbol: ts.Symbol): ModuleInfo | undefined 
     if (declarations && declarations.length > 0) {
         for (const declaration of declarations) {
             const sourceFile = declaration.getSourceFile();
-            const moduleName = sourceFile.moduleName || sourceFile.fileName;
+            let moduleName = sourceFile.moduleName || sourceFile.fileName;
+
+            const matchedDeps = moduleName.match(DependencyExpReg);
+
+            if(matchedDeps) {
+               moduleName = matchedDeps[1].slice(1);
+            }
+
 
             const found = ts.forEachChild(sourceFile, child => {
 
@@ -170,3 +177,5 @@ export const findReferenceUsagesInScope = (
 
     return outerReferences;
 };
+
+const DependencyExpReg = /node_modules((\/@[^/]+)?(\/[^@/]+))/;

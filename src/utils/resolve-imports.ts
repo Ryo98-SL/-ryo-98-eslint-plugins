@@ -1,10 +1,11 @@
-import ts, {type NamedImports, ObjectFlags, SyntaxKind, TypeFlags} from "typescript";
+import ts, {type NamedImports, ObjectFlags, SyntaxKind, TypeFlags, UnionOrIntersectionType} from "typescript";
 import {ImportUpdateResult, ModuleInfo, TsService} from "./types.ts";
 import type {RuleFix, RuleFixer} from "@typescript-eslint/utils/ts-eslint";
 import {resolveModulePath} from "./resolve-module-path.ts";
 import path from "path";
 import {ScopeManager} from "@typescript-eslint/scope-manager";
 import {findSymbolExportInfo} from "./pin.ts";
+import * as util from "node:util";
 
 /**
  * 为指定的具名值创建导入声明
@@ -245,7 +246,15 @@ export function analyzeTypeAndCreateImports(
     const resolveToRelativePath = options?.resolveToRelativePath ?? true;
 
     // Recursive function to analyze types and collect imports
-    function collectTypesToImport(type: ts.Type, visited = new Set<ts.Type>()) {
+    function collectTypesToImport(type: ts.Type, visited = new Set<ts.Type>(), context: {from: string[]}) {
+        const typeStr = tsChecker.typeToString(type);
+        console.log(`=> type ${typeStr}`, util.inspect(type, false, 0), context.from);
+
+        if(type.origin) {
+            const originType = type.origin;
+
+            console.log(`=> type origin ${tsChecker.typeToString(originType)}`, util.inspect(originType, false, 0));
+        }
 
         if (visited.has(type)) return;
         visited.add(type);
@@ -253,7 +262,75 @@ export function analyzeTypeAndCreateImports(
         // Get type symbol
         const symbol = type.getSymbol() || type.aliasSymbol;
 
+        // Handle union and intersection types
+        if (!type.aliasSymbol && type.isUnionOrIntersection()) {
+
+            const _context = { from: [tsChecker.typeToString(type) + '_1', ...context.from] };
+
+            let target:UnionOrIntersectionType
+            if(type.origin && type.origin.isUnionOrIntersection()) {
+                target = type.origin;
+            } else {
+                target = type;
+            }
+
+            target.types.forEach(t => collectTypesToImport(t, visited, _context));
+            return;
+        }
+
+        // Handle generic type parameters
+        if (type.flags & ts.TypeFlags.Object && !type.aliasSymbol) {
+
+            console.log(`=> ${typeStr} hit object`)
+
+            const _context = { from: [tsChecker.typeToString(type) + '_2', ...context.from] };
+
+            const objectType = type as ts.ObjectType;
+            if (objectType.objectFlags & ts.ObjectFlags.Reference) {
+                const typeReference = type as ts.TypeReference;
+                if (typeReference.typeArguments) {
+                    typeReference.typeArguments.forEach(typeArg => {
+                        collectTypesToImport(typeArg, visited, _context);
+                    });
+                }
+            }
+        }
+
+        // Handle function types' parameters and return types
+        if (type.getCallSignatures && type.getCallSignatures().length > 0) {
+            const _context = { from: [tsChecker.typeToString(type) + '_3', ...context.from] };
+
+            type.getCallSignatures().forEach(signature => {
+                signature.getParameters().forEach(param => {
+                    const paramType = tsChecker.getTypeOfSymbolAtLocation(param, sourceFile);
+                    collectTypesToImport(paramType, visited, _context);
+                });
+
+                const returnType = signature.getReturnType();
+                collectTypesToImport(returnType, visited, _context);
+            });
+        }
+
+        // Analyze property types
+        if (type.isLiteral() && tsChecker.getPropertiesOfType(type).length > 0) {
+
+            const _context = { from: [tsChecker.typeToString(type) + '_4', ...context.from] };
+
+            tsChecker.getPropertiesOfType(type).forEach(prop => {
+                const propType = tsChecker.getTypeOfSymbolAtLocation(prop, sourceFile);
+                collectTypesToImport(propType, visited, _context);
+            });
+        }
+
         if (symbol && (!tsChecker.isArrayType(type) || type.aliasSymbol)) {
+
+            if(type.aliasTypeArguments && type.isUnionOrIntersection()) {
+                const _context = { from: [tsChecker.typeToString(type) + '_5', ...context.from] };
+
+                type.aliasTypeArguments.forEach(typeArg => {
+                    collectTypesToImport(typeArg, visited, _context);
+                });
+            }
 
             let moduleInfo: ModuleInfo | undefined;
             moduleInfo = findSymbolExportInfo(type.aliasSymbol || type.symbol);
@@ -303,51 +380,12 @@ export function analyzeTypeAndCreateImports(
             }
 
         }
-
-        // Handle union and intersection types
-        if (!type.aliasSymbol && type.isUnionOrIntersection()) {
-            type.types.forEach(t => collectTypesToImport(t, visited));
-            return;
-        }
-
-        // Handle generic type parameters
-        if (type.flags & ts.TypeFlags.Object && !type.aliasSymbol) {
-            const objectType = type as ts.ObjectType;
-            if (objectType.objectFlags & ts.ObjectFlags.Reference) {
-                const typeReference = type as ts.TypeReference;
-                if (typeReference.typeArguments) {
-                    typeReference.typeArguments.forEach(typeArg => {
-                        collectTypesToImport(typeArg, visited);
-                    });
-                }
-            }
-        }
-
-        // Handle function types' parameters and return types
-        if (type.getCallSignatures && type.getCallSignatures().length > 0) {
-            type.getCallSignatures().forEach(signature => {
-                signature.getParameters().forEach(param => {
-                    const paramType = tsChecker.getTypeOfSymbolAtLocation(param, sourceFile);
-                    collectTypesToImport(paramType, visited);
-                });
-
-                const returnType = signature.getReturnType();
-                collectTypesToImport(returnType, visited);
-            });
-        }
-
-        // Analyze property types
-        if (type.isLiteral() && tsChecker.getPropertiesOfType(type).length > 0) {
-            tsChecker.getPropertiesOfType(type).forEach(prop => {
-                const propType = tsChecker.getTypeOfSymbolAtLocation(prop, sourceFile);
-                collectTypesToImport(propType, visited);
-            });
-        }
     }
 
 
     // Start analyzing the type
-    collectTypesToImport(typeToAnalyze);
+    collectTypesToImport(typeToAnalyze, undefined, { from: ['root']});
+
     const dirname = path.dirname(sourceFile.fileName);
 
 
