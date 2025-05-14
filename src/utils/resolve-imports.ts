@@ -6,6 +6,7 @@ import path from "path";
 import {ScopeManager} from "@typescript-eslint/scope-manager";
 import {findSymbolExportInfo} from "./pin.ts";
 import * as util from "node:util";
+import {electron} from "webpack";
 
 /**
  * 为指定的具名值创建导入声明
@@ -228,6 +229,8 @@ export const injectWithImport = (fixer: RuleFixer, fixes: RuleFix[], tsService: 
     })
 }
 
+type TypeAndString = { type: ts.Type, name: string };
+
 export function analyzeTypeAndCreateImports(
     typeToAnalyze: ts.Type,
     tsService: TsService,
@@ -239,9 +242,9 @@ export function analyzeTypeAndCreateImports(
 ): ImportUpdateResult[] {
     const factory = ts.factory;
     const result: ImportUpdateResult[] = [];
-    const typeModulesMap = new Map<string, Set<string>>();
-    const defaultExportModulesMap = new Map<string, string>();
-    const namespaceImportModulesMap = new Map<string, string>();
+    const typeModulesMap = new Map<string, Set<TypeAndString>>();
+    const defaultExportModulesMap = new Map<string, TypeAndString>();
+    const namespaceImportModulesMap = new Map<string, TypeAndString>();
 
     const resolveToRelativePath = options?.resolveToRelativePath ?? true;
 
@@ -323,7 +326,7 @@ export function analyzeTypeAndCreateImports(
         }
 
         if (symbol && (!tsChecker.isArrayType(type) || type.aliasSymbol)) {
-
+            // case for mui's SxProps<Theme> type pattern
             if(type.aliasTypeArguments && type.isUnionOrIntersection()) {
                 const _context = { from: [tsChecker.typeToString(type) + '_5', ...context.from] };
 
@@ -369,13 +372,13 @@ export function analyzeTypeAndCreateImports(
                 if (!typeName) return;
                 // Check if it's a default export
                 if (symbol.escapedName === "default" || moduleInfo.isDefaultExport) {
-                    defaultExportModulesMap.set(_moduleName, typeName);
+                    defaultExportModulesMap.set(_moduleName, {name: typeName, type: type});
                 } else {
                     // Add to named imports
                     if (!typeModulesMap.has(_moduleName)) {
-                        typeModulesMap.set(_moduleName, new Set<string>());
+                        typeModulesMap.set(_moduleName, new Set<TypeAndString>());
                     }
-                    typeModulesMap.get(_moduleName)!.add(typeName);
+                    typeModulesMap.get(_moduleName)!.add({ type, name: typeName });
                 }
             }
 
@@ -393,6 +396,7 @@ export function analyzeTypeAndCreateImports(
     const existingImports = new Map<string | undefined, ts.ImportDeclaration>();
     for (const statement of sourceFile.statements) {
         if (ts.isImportDeclaration(statement) && ts.isStringLiteral(statement.moduleSpecifier)) {
+
             const resolvedModulePath = resolveModulePath(statement.moduleSpecifier.text, program);
             if (resolvedModulePath) {
                 existingImports.set(resolvedModulePath, statement)
@@ -411,9 +415,16 @@ export function analyzeTypeAndCreateImports(
         return path.resolve(dirname, name).replace(/\\/g, '/');
     }
 
+
+
+
+
     // Process each module that needs imports
     // Handle default imports
-    for (const [moduleName, importName] of defaultExportModulesMap.entries()) {
+    for (const [moduleName, { name: importName, type }] of defaultExportModulesMap.entries()) {
+
+        if(checkAlreadyImportTheName(importName, type, tsChecker, program, existingImports)) continue;
+
         const existingImport = existingImports.get(moduleNameToAbsolute(moduleName));
 
         // Create import clause with default import
@@ -437,7 +448,9 @@ export function analyzeTypeAndCreateImports(
     }
 
     // Handle namespace imports
-    for (const [moduleName, importName] of namespaceImportModulesMap.entries()) {
+    for (const [moduleName, { name: importName, type }] of namespaceImportModulesMap.entries()) {
+        if(checkAlreadyImportTheName(importName, type, tsChecker, program, existingImports)) continue;
+
         const existingImport = existingImports.get(moduleNameToAbsolute(moduleName));
 
         // Create namespace import
@@ -466,16 +479,20 @@ export function analyzeTypeAndCreateImports(
     }
 
     // Handle named imports
-    for (const [moduleName, typeNames] of typeModulesMap.entries()) {
+    outer : for (const [moduleName, typeNames] of typeModulesMap.entries()) {
+        for (const {name: typeName, type} of typeNames) {
+            if(checkAlreadyImportTheName(typeName, type, tsChecker, program, existingImports)) continue outer;
+        }
+
         const existingImport = existingImports.get(moduleNameToAbsolute(moduleName));
 
         if (typeNames.size > 0) {
             // Create import specifiers for each named import
-            const importSpecifiers = Array.from(typeNames).map(name =>
+            const importSpecifiers = Array.from(typeNames).map(info =>
                 factory.createImportSpecifier(
                     false,
                     undefined,
-                    factory.createIdentifier(name)
+                    factory.createIdentifier(info.name)
                 )
             );
 
@@ -504,4 +521,136 @@ export function analyzeTypeAndCreateImports(
     }
 
     return result;
+}
+
+const checkAlreadyImportTheName = (_name: string, _type: ts.Type, tsChecker: ts.TypeChecker, program: ts.Program, existingImports: Map<string | undefined, ts.ImportDeclaration>) => {
+    let alreadyHave: { dec: ts.ImportDeclaration, node: ts.Node, type: ts.Type, assignable: boolean } | undefined;
+    for (let [importPath , existingImport] of existingImports) {
+
+        let alreadyDefined: { dec: ts.ImportDeclaration, node: ts.Node, isTypeOnly: boolean, name: string } | undefined;
+
+        if (existingImport.importClause) {
+            const clauseTypeOnly = existingImport.importClause.isTypeOnly;
+
+            if (existingImport.importClause.namedBindings) {
+                if (ts.isNamedImports(existingImport.importClause.namedBindings)) {
+                    const found = existingImport.importClause.namedBindings.elements.find(element => {
+                        return element.name.escapedText === _name
+                    });
+                    if (found) alreadyDefined = {
+                        dec: existingImport,
+                        node: found,
+                        isTypeOnly: clauseTypeOnly || found.isTypeOnly,
+                        name: found.name.escapedText as string
+                    };
+                } else if (existingImport.importClause.namedBindings.name.escapedText === _name) {
+                    alreadyDefined = {
+                        dec: existingImport,
+                        node: existingImport.importClause.namedBindings.name,
+                        name: existingImport.importClause.namedBindings.name.escapedText,
+                        isTypeOnly: clauseTypeOnly
+                    };
+                }
+            } else if (existingImport.importClause.name && existingImport.importClause.name.escapedText === _name) {
+                alreadyDefined = {
+                    dec: existingImport,
+                    node: existingImport.importClause.name,
+                    name: existingImport.importClause.name.escapedText,
+                    isTypeOnly: clauseTypeOnly
+                };
+            }
+        }
+
+        if (alreadyDefined) {
+
+            let importType = tsChecker.getTypeAtLocation(alreadyDefined.node);
+
+
+            const typeAssignable =  alreadyDefined.isTypeOnly
+                ? tsChecker.isTypeAssignableTo(_type, importType)
+                : (() => {
+                    if(importPath) {
+                        const sourceFile = program.getSourceFile(importPath);
+                        if(sourceFile) {
+                            const typeNode = getFileTopLevelTypeByName( [ alreadyDefined.name ] , sourceFile);
+                            if(typeNode) {
+                                return getTypeNodeIdentifierName(typeNode) === _type.symbol.name;
+                            }
+                        }
+                    }
+
+
+                    return false;
+                })();
+
+
+            alreadyHave = {
+                ...alreadyDefined,
+                type: tsChecker.getTypeAtLocation(alreadyDefined.node),
+                assignable: (!!_type.aliasTypeArguments && _type.isUnionOrIntersection() && isSameDeclarationFile(_type, importType)) // type is union and generic is complex, check if is same declaration file instead.
+                    || typeAssignable
+            }
+            break;
+        }
+    }
+
+    if (alreadyHave) {
+        console.log(`=> already have ${alreadyHave.node.getText()} - ${tsChecker.typeToString(alreadyHave.type)} => ${tsChecker.typeToString(_type)}`, util.inspect(alreadyHave, false, 0))
+    }
+
+    return alreadyHave;
+}
+
+const isSameDeclarationFile = (type1: ts.Type, type2: ts.Type) => {
+    return type1.symbol?.declarations?.[0]?.getSourceFile().fileName === type2.symbol?.declarations?.[0]?.getSourceFile().fileName
+}
+
+
+
+const getFileTopLevelTypeByName = (typeNames: string[], sourceFile: ts.SourceFile) => {
+    return ts.forEachChild(sourceFile, (node) => {
+        if(!isTypeNode(node)) {
+            return;
+        }
+
+        const nodeIdentifierName = getTypeNodeIdentifierName(node);
+        if(typeof nodeIdentifierName !== 'string') return;
+
+        if(typeNames.includes(nodeIdentifierName)) {
+            return node;
+        }
+    })}
+
+const isTypeNode = (node: ts.Node): boolean => {
+    // 检查是否为类型别名声明 (type Foo = ...)
+    if (ts.isTypeAliasDeclaration(node)) {
+        return true;
+    }
+
+    // 检查是否为接口声明 (interface Foo {...})
+    if (ts.isInterfaceDeclaration(node)) {
+        return true;
+    }
+
+    // 检查是否为枚举声明 (enum Foo {...})
+    if (ts.isEnumDeclaration(node)) {
+        return true;
+    }
+
+    // 检查是否为类声明 (class Foo {...})
+    if (ts.isClassDeclaration(node) && node.name) {
+        return true;
+    }
+
+    return false;
+};
+
+const getTypeNodeIdentifierName = (node: ts.Node) => {
+    if (ts.isTypeAliasDeclaration(node) ||
+        ts.isInterfaceDeclaration(node) ||
+        ts.isEnumDeclaration(node) ||
+        ts.isClassDeclaration(node)) {
+        return node.name ? node.name.text : undefined;
+    }
+    return undefined;
 }

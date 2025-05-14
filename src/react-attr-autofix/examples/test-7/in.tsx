@@ -1,5 +1,5 @@
 import {Box} from "@mui/material";
-
+import { SxProps} from "@mui/material";
 
 function MyComponent() {
 

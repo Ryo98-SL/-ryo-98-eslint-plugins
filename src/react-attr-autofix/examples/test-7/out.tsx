@@ -1,6 +1,5 @@
-import { Theme, Box } from "@mui/material";
-import { SxProps } from "@mui/system";
-
+import {Box} from "@mui/material";
+import { Theme, SxProps } from "@mui/material";
 
 function MyComponent() {
 
