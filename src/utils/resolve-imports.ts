@@ -1,5 +1,5 @@
 import ts, {type NamedImports, ObjectFlags, SyntaxKind, TypeFlags, UnionOrIntersectionType} from "typescript";
-import {ImportUpdateResult, ModuleInfo, TsService} from "./types.ts";
+import {ImportUpdateResult, ModuleInfo, TsService, TypedRuleContext} from "./types.ts";
 import type {RuleFix, RuleFixer} from "@typescript-eslint/utils/ts-eslint";
 import {resolveModulePath} from "./resolve-module-path.ts";
 import path from "path";
@@ -7,6 +7,7 @@ import {ScopeManager} from "@typescript-eslint/scope-manager";
 import {findSymbolExportInfo} from "./pin.ts";
 import * as util from "node:util";
 import {electron} from "webpack";
+import {resolvePathToAlias} from "./process-config.ts";
 
 /**
  * 为指定的具名值创建导入声明
@@ -238,8 +239,8 @@ export function analyzeTypeAndCreateImports(
     sourceFile: ts.SourceFile,
     program: ts.Program,
     scopeManager: ScopeManager,
-    options?: { resolveToRelativePath?: boolean }
-): ImportUpdateResult[] {
+    currentFilePath: string,
+    configPath?: string | null, options?: { resolveToRelativePath?: boolean }): ImportUpdateResult[] {
     const factory = ts.factory;
     const result: ImportUpdateResult[] = [];
     const typeModulesMap = new Map<string, Set<TypeAndString>>();
@@ -247,6 +248,8 @@ export function analyzeTypeAndCreateImports(
     const namespaceImportModulesMap = new Map<string, TypeAndString>();
 
     const resolveToRelativePath = options?.resolveToRelativePath ?? true;
+
+    const aliasPaths = program.getCompilerOptions().paths;
 
     // Recursive function to analyze types and collect imports
     function collectTypesToImport(type: ts.Type, visited = new Set<ts.Type>(), context: {from: string[]}) {
@@ -342,7 +345,17 @@ export function analyzeTypeAndCreateImports(
 
                 let _moduleName: string;
                 const moduleDir = path.dirname(sourceFile.fileName);
-                if (resolveToRelativePath && path.isAbsolute(moduleInfo.moduleName)) {
+
+                let withAliasPath: string | null = null;
+                console.log('=> aliasPaths', {aliasPaths, configPath, current: currentFilePath})
+                if(aliasPaths && configPath ) {
+                    withAliasPath = resolvePathToAlias(moduleInfo.moduleName, configPath, program.getCompilerOptions(), currentFilePath)
+                }
+
+
+                if(withAliasPath) {
+                    _moduleName = withAliasPath;
+                } else if (resolveToRelativePath && path.isAbsolute(moduleInfo.moduleName)) {
                     _moduleName = path.relative(moduleDir, moduleInfo.moduleName).replace(/\\/g, '/');
                     if (!_moduleName.startsWith('./')) {
                         _moduleName = './' + _moduleName;

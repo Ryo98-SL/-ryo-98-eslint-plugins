@@ -1,7 +1,7 @@
 import {
     addIndentationToEachLine,
     analyzeTypeAndCreateImports,
-    createRule, getComponentName, getRefHookDeclarationText,
+    createRule, findTsConfigPath, getComponentName, getRefHookDeclarationText,
     getTypeNodeForProp
 } from "../../utils";
 import {AST_NODE_TYPES, ESLintUtils} from "@typescript-eslint/utils";
@@ -38,6 +38,8 @@ export const autoCreateRefRule = createRule({
         const filename = context.filename;
         const scopeManager = context.sourceCode.scopeManager!
         const printer = ts.createPrinter();
+        const currentFilePath = context.getFilename();
+        const tsConfigPath = findTsConfigPath(path.dirname(currentFilePath));
 
         return {
             "JSXAttribute": (node) => {
@@ -99,7 +101,7 @@ export const autoCreateRefRule = createRule({
                 }
 
                 pushImport(createImport('useRef', 'react', false, sourceFile!, tsService.program));
-                pushImport(analyzeTypeAndCreateImports(aliasTypeArgument, tsService, tsChecker, sourceFile!, tsService.program, scopeManager, {resolveToRelativePath: true}))
+                pushImport(analyzeTypeAndCreateImports(aliasTypeArgument, tsService, tsChecker, sourceFile!, tsService.program, scopeManager, currentFilePath, tsConfigPath, {resolveToRelativePath: true}))
 
                 const {text: declarationText, variableStatement} = getRefHookDeclarationText(expression.name, aliasTypeArgument, printer, sourceFile, tsChecker);
 

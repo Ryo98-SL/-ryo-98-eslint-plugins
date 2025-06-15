@@ -1,4 +1,4 @@
-import ListDataArrayAlias, { ModalInfoType, Modal } from "./../modal.tsx";
+import ListDataArrayAlias, { ModalInfoType, Modal } from "@examples/modal.tsx";
 import { useCallback, useMemo, useState } from "react";
 
 

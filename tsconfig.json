@@ -23,6 +23,9 @@
     "noUnusedLocals": false,
     "noUnusedParameters": false,
     "noPropertyAccessFromIndexSignature": false,
+    "paths": {
+      "@examples/*": ["src/react-attr-autofix/examples/*"]
+    }
   },
 
   "exclude": ["dist","**/*.txt", "**/*.json"]

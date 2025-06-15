@@ -6,7 +6,7 @@ import {
     findEndInsertPosition,
     findParentNode,
     findReferenceUsagesInScope,
-    findStartInsertPosition,
+    findStartInsertPosition, findTsConfigPath,
     FixScene,
     generateVariableName,
     getComponentName,
@@ -149,6 +149,9 @@ export const noInlineLiteralObjectRule = createRule({
         const scopeManager = context.sourceCode.scopeManager!;
         const sourceCode = context.sourceCode;
 
+        const currentFilePath = context.getFilename();
+        const tsConfigPath = findTsConfigPath(path.dirname(currentFilePath));
+
         const printer = ts.createPrinter();
         return {
             // Detect object literals in JSX attributes
@@ -284,7 +287,7 @@ export const noInlineLiteralObjectRule = createRule({
                 let attrType: ts.Type | ts.TypeNode | undefined = resolvedTypeInfo?.type;
 
                 if (resolvedTypeInfo && sourceFile) {
-                    const importUpdates = analyzeTypeAndCreateImports(resolvedTypeInfo.type, tsService, tsChecker, sourceFile, tsService.program, scopeManager);
+                    const importUpdates = analyzeTypeAndCreateImports(resolvedTypeInfo.type, tsService, tsChecker, sourceFile, tsService.program, scopeManager, currentFilePath, tsConfigPath);
                     pushImport(importUpdates)
                 }
 
