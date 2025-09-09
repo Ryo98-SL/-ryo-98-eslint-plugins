@@ -92,7 +92,7 @@ function findExistingImport(modulePath: string, sourceFile: ts.SourceFile, progr
  * @param results ImportUpdateResult 数组
  * @returns 合并后的 ImportUpdateResult 数组
  */
-export function mergeImportUpdateResults(results: ImportUpdateResult[], dirname: string): ImportUpdateResult[] {
+export function mergeImportUpdateResults(results: ImportUpdateResult[], dirname: string, tsChecker: ts.TypeChecker, sourceFile: ts.SourceFile): ImportUpdateResult[] {
     const moduleMap = new Map<string, ImportUpdateResult>();
 
     for (const result of results) {
@@ -102,7 +102,7 @@ export function mergeImportUpdateResults(results: ImportUpdateResult[], dirname:
 
         if (!moduleMap.has(moduleSpecifier)) {
             if (result.originalDeclaration) {
-                result.newDeclaration = mergeImportDeclarations(result.newDeclaration, result.originalDeclaration)
+                result.newDeclaration = mergeImportDeclarations(result.newDeclaration, result.originalDeclaration, sourceFile)
             }
             moduleMap.set(moduleSpecifier, result);
         } else {
@@ -110,7 +110,8 @@ export function mergeImportUpdateResults(results: ImportUpdateResult[], dirname:
             const existingResult = moduleMap.get(moduleSpecifier)!;
             const mergedDeclaration = mergeImportDeclarations(
                 existingResult.newDeclaration,
-                result.newDeclaration
+                result.newDeclaration,
+                sourceFile
             );
 
             moduleMap.set(moduleSpecifier, {
@@ -123,6 +124,7 @@ export function mergeImportUpdateResults(results: ImportUpdateResult[], dirname:
     return Array.from(moduleMap.values());
 }
 
+const ModuleRegexp = /(@types\/)?([^@\/"']+)/;
 /**
  * 合并两个 ImportDeclaration
  * @param decl1 第一个 ImportDeclaration
@@ -131,12 +133,22 @@ export function mergeImportUpdateResults(results: ImportUpdateResult[], dirname:
  */
 function mergeImportDeclarations(
     decl1: ts.ImportDeclaration,
-    decl2: ts.ImportDeclaration
+    decl2: ts.ImportDeclaration,
+    sourceFile: ts.SourceFile,
 ): ts.ImportDeclaration {
     const factory = ts.factory;
+    const printer = ts.createPrinter();
 
-    // 确保两个声明来自同一个模块
-    const moduleSpecifier = decl1.moduleSpecifier;
+    // if found pattern like "@types/moduleName" and "moduleName", will get the "moduleName"
+    const moduleSpecifier = [decl1, decl2].find((decl) => {
+        const s = printer.printNode(ts.EmitHint.Unspecified,decl.moduleSpecifier,sourceFile);
+        const match = s.match(ModuleRegexp);
+
+        return match && !match[1];
+    })?.moduleSpecifier || decl1.moduleSpecifier;
+
+
+
 
     const clause1 = decl1.importClause;
     const clause2 = decl2.importClause;
@@ -240,9 +252,9 @@ export function analyzeTypeAndCreateImports(
     program: ts.Program,
     scopeManager: ScopeManager,
     currentFilePath: string,
-    configPath?: string | null, options?: { resolveToRelativePath?: boolean }): ImportUpdateResult[] {
+    configPath?: string | null, options?: { resolveToRelativePath?: boolean }): { results: ImportUpdateResult[], scene: 'normal' | 'imported'} {
     const factory = ts.factory;
-    const result: ImportUpdateResult[] = [];
+    const results: ImportUpdateResult[] = [];
     const typeModulesMap = new Map<string, Set<TypeAndString>>();
     const defaultExportModulesMap = new Map<string, TypeAndString>();
     const namespaceImportModulesMap = new Map<string, TypeAndString>();
@@ -256,11 +268,11 @@ export function analyzeTypeAndCreateImports(
         const typeStr = tsChecker.typeToString(type);
         console.log(`=> type ${typeStr}`, util.inspect(type, false, 0), context.from);
 
-        if(type.origin) {
-            const originType = type.origin;
-
-            console.log(`=> type origin ${tsChecker.typeToString(originType)}`, util.inspect(originType, false, 0));
-        }
+        // if(type.origin) {
+        //     const originType = type.origin;
+        //
+        //     console.log(`=> type origin ${tsChecker.typeToString(originType)}`, util.inspect(originType, false, 0));
+        // }
 
         if (visited.has(type)) return;
         visited.add(type);
@@ -339,7 +351,7 @@ export function analyzeTypeAndCreateImports(
             }
 
             let moduleInfo: ModuleInfo | undefined;
-            moduleInfo = findSymbolExportInfo(type.aliasSymbol || type.symbol);
+            moduleInfo = findSymbolExportInfo(type.aliasSymbol || type.symbol, tsChecker);
 
             if (moduleInfo && moduleInfo.moduleName && moduleInfo.moduleName !== sourceFile.fileName && moduleInfo.moduleName !== 'typescript') {
 
@@ -454,7 +466,7 @@ export function analyzeTypeAndCreateImports(
             factory.createStringLiteral(moduleName)
         );
 
-        result.push({
+        results.push({
             originalDeclaration: existingImport || null,
             newDeclaration: importDecl
         });
@@ -485,16 +497,21 @@ export function analyzeTypeAndCreateImports(
             factory.createStringLiteral(moduleName)
         );
 
-        result.push({
+        results.push({
             originalDeclaration: existingImport || null,
             newDeclaration: importDecl
         });
     }
 
+    let hasAlreadyImported = false;
+
     // Handle named imports
     outer : for (const [moduleName, typeNames] of typeModulesMap.entries()) {
         for (const {name: typeName, type} of typeNames) {
-            if(checkAlreadyImportTheName(typeName, type, tsChecker, program, existingImports)) continue outer;
+            if(checkAlreadyImportTheName(typeName, type, tsChecker, program, existingImports)) {
+                hasAlreadyImported = true;
+                continue outer;
+            }
         }
 
         const existingImport = existingImports.get(moduleNameToAbsolute(moduleName));
@@ -526,14 +543,23 @@ export function analyzeTypeAndCreateImports(
                 factory.createStringLiteral(moduleName)
             );
 
-            result.push({
+            results.push({
                 originalDeclaration: existingImport || null,
                 newDeclaration: importDecl
             });
         }
     }
 
-    return result;
+    let scene: 'normal' | 'imported' = 'normal';
+    // There has a case that the type already imported, when results's length is 0
+    if(results.length === 0 && hasAlreadyImported) {
+        scene = 'imported'
+    }
+
+    return {
+        results,
+        scene
+    };
 }
 
 const checkAlreadyImportTheName = (_name: string, _type: ts.Type, tsChecker: ts.TypeChecker, program: ts.Program, existingImports: Map<string | undefined, ts.ImportDeclaration>) => {

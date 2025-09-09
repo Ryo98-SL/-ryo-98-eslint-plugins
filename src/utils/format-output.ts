@@ -6,7 +6,7 @@ import {findParentNode} from "./pin.ts";
 
 export const getPositionBetweenReturnAndSymbols = (
     body: TSESTree.BlockStatement,
-    symbols: ts.Symbol[],
+    symbols: { symbol: ts.Symbol, node: ts.Node }[],
     tsService: TsService,
 ) => {
     let defaultIndent = 0;
@@ -25,7 +25,7 @@ export const getPositionBetweenReturnAndSymbols = (
     const {
         end: insertPosition,
         indent
-    } = symbols.reduce((info, symbol) => {
+    } = symbols.reduce((info, {symbol}) => {
         const _pos = (symbol.valueDeclaration!).end;
         const parent = findParentNode(tsService.tsNodeToESTreeNodeMap.get(symbol.valueDeclaration!), [AST_NODE_TYPES.FunctionDeclaration, AST_NODE_TYPES.VariableDeclaration, AST_NODE_TYPES.ClassDeclaration]);
 
@@ -96,7 +96,7 @@ export const getMemoCallbackHookDeclarationText = (
     tsExpression: ts.FunctionExpression | ts.ObjectLiteralExpression,
     variableName: string,
     type: ts.Type | ts.TypeNode | undefined | null,
-    references: ts.Symbol[],
+    references: { symbol: ts.Symbol, node: ts.Node }[],
     printer: ts.Printer,
     sourceFile: ts.SourceFile | undefined,
     tsChecker: ts.TypeChecker
@@ -136,8 +136,22 @@ export const getMemoCallbackHookDeclarationText = (
     }
 
     const referencesIdentifiers = references.map(ref => {
-        return ts.factory.createIdentifier(ref.name);
-    })
+        /**
+         * let the entire expression append to deps list:
+         *
+         * useEffect(() => {
+         *     console.log(props.data);
+         *                 ^----
+         * }, [ props.data ])
+         *      ^----
+         */
+        if(ts.isPropertyAccessExpression(ref.node)) {
+            return ref.node
+        }
+
+        return ts.factory.createIdentifier(ref.symbol.name);
+    });
+
     const depsArray = ts.factory.createArrayLiteralExpression(referencesIdentifiers);
 
 

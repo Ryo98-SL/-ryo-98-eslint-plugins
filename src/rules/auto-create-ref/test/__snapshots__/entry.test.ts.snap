@@ -1,0 +1,15 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`test auto-create-ref > auto-create-ref base 1`] = `
+"import {Dialog} from "../../../../share-comps/dialog.tsx";
+
+
+const MyFc = () => <Dialog ref={dialogRef} width={genClose().getWidth()} />
+
+const genClose = () => {
+    return {
+        base: () => {},
+        getWidth: () => ({get: () => 1})
+    }
+}"
+`;

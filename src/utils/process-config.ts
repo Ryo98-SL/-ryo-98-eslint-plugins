@@ -134,7 +134,7 @@ export function resolvePathToAlias(inputPath: string, tsConfigPath: string, tsCo
 }
 
 // 在实际项目中使用的最佳实践
-function bestPracticeNormalize(filePath) {
+function bestPracticeNormalize(filePath: string) {
     if (!filePath) return '';
 
     // 1. 处理路径规范化

@@ -1,9 +1,10 @@
-// 辅助函数来查找 IntrinsicElements 接口
-import {Scope} from "@typescript-eslint/utils/ts-eslint";
+import {Scope,  } from "@typescript-eslint/utils/ts-eslint";
 import {AST_NODE_TYPES, type TSESTree} from "@typescript-eslint/typescript-estree";
 import {MapNodeWithTypes, ModuleInfo, TsService} from "./types.ts";
 import ts from "typescript";
 import {isNodeDescendant} from "./index.ts";
+import ScopeManager = Scope.ScopeManager;
+import ex = CSS.ex;
 
 export function findIntrinsicElementsInterface(sourceFile: ts.SourceFile, checker: ts.TypeChecker): ts.InterfaceDeclaration | null {
     // 这部分需要递归遍历 AST 来找到 JSX 命名空间和 IntrinsicElements 接口
@@ -75,7 +76,7 @@ export const findStartInsertPosition = (programNode: any): number => {
 export const findEndInsertPosition = (programNode: any): number => programNode.range[1];
 
 
-export const findSymbolExportInfo = (symbol: ts.Symbol): ModuleInfo | undefined => {
+export const findSymbolExportInfo = (symbol: ts.Symbol, tsChecker: ts.TypeChecker): ModuleInfo | undefined => {
     const declarations = symbol.getDeclarations();
 
     if (symbol.valueDeclaration) {
@@ -97,11 +98,12 @@ export const findSymbolExportInfo = (symbol: ts.Symbol): ModuleInfo | undefined 
             const matchedDeps = moduleName.match(DependencyExpReg);
 
             if(matchedDeps) {
+                // prune the '/' at the beginning of the path segment
                moduleName = matchedDeps[1].slice(1);
             }
 
 
-            const found = ts.forEachChild(sourceFile, child => {
+            const visit = (child: ts.Node) => {
 
                 if (ts.canHaveModifiers(child)
                     && !!child.modifiers?.some(m => m.kind === ts.SyntaxKind.ExportKeyword)
@@ -109,13 +111,22 @@ export const findSymbolExportInfo = (symbol: ts.Symbol): ModuleInfo | undefined 
                     && child.name?.getText() === symbol.getName()
                 ) {
                     return 'namedExport'
-                } else if (ts.isExportAssignment(child) && ts.isIdentifier(child.expression) && (console.log(child.expression.text, symbol.getName()) , child.expression.text === symbol.getName())) {
-
-                    return 'defaultExport'
+                } else if (ts.isExportAssignment(child) && ts.isIdentifier(child.expression)) { // For the case: "export = Namespace"
+                    if(child.expression.text === symbol.getName()) {
+                        return 'defaultExport'
+                    } else {
+                        const exports = tsChecker.getSymbolAtLocation(child.expression)?.exports;
+                        // @ts-ignore
+                        if(exports && exports.get(symbol.getName())) {
+                            return 'namedExport';
+                        }
+                    }
                 } else if (ts.isExportDeclaration(child) && child.exportClause && ts.isNamedExports(child.exportClause) && child.exportClause.elements.find(el => el.name.text === symbol.getName())) {
                     return 'namedExport'
                 }
-            });
+            }
+
+            const found = ts.forEachChild(sourceFile, visit);
 
 
             if (found) return {
@@ -135,38 +146,88 @@ export const findScopedVariable = (variableName: string, scope: Scope.Scope) => 
 
         current = current!.upper
     }
-
-
 }
+
 export const findReferenceUsagesInScope = (
     tsServices: TsService,
     node: TSESTree.Node
 ) => {
     const tsNode = tsServices.esTreeNodeToTSNodeMap.get(node);
 
-    const outerReferences = new Set<ts.Symbol>();
+    const usedSet = new Set<ts.Symbol>();
+    const outerReferences: { symbol: ts.Symbol, node: ts.Node }[] = [];
     const tsChecker = tsServices.program.getTypeChecker();
 
     function analyzeIdentifiers(_node: ts.Node) {
-        if (ts.isIdentifier(_node) || ts.isShorthandPropertyAssignment(_node)) {
+
+        /**
+         * For simplest case like: console.log(item)
+         *                                     ^---- just an identifier
+         */
+        const isIdentifier = ts.isIdentifier(_node);
+
+        /**
+         * Pattern like:
+         *
+         *  <Box onClick={() => {
+         *      console.log({ foo });
+         *                    ^---- shorthand property assignment
+         *  }}>
+         *
+         */
+        const isShorthandPropertyAssignment = ts.isShorthandPropertyAssignment(_node);
+
+
+        /**
+         * Pattern like:
+         *
+         * <Box onClick={() =>{
+         *     console.log(props.item)
+         *                  ^---- property access expression
+         * }} />
+         *
+         */
+        const isPropertyAccessExpression = ts.isPropertyAccessExpression(_node);
+
+        if (isIdentifier || isShorthandPropertyAssignment || isPropertyAccessExpression) {
             // 获取标识符的符号
             let symbol: ts.Symbol | undefined;
-            if (ts.isShorthandPropertyAssignment(_node)) {
+            if (isShorthandPropertyAssignment) {
                 symbol = tsChecker.getShorthandAssignmentValueSymbol(_node)
+            } else if(isPropertyAccessExpression) {
+                symbol = tsChecker.getSymbolAtLocation(_node)
             } else {
                 symbol = tsChecker.getSymbolAtLocation(_node)
             }
 
             if (symbol) {
-                const valueDeclaration = symbol.valueDeclaration;
-                if (valueDeclaration) {
+                if(usedSet.has(symbol)) {
 
-                    // 检查声明是否在箭头函数外部
-                    if (!isNodeDescendant(valueDeclaration, tsNode)) {
-                        // 这是一个外部引用
-                        outerReferences.add(symbol);
+                    /**
+                     * No need to dig into the PropertyAccessExpression, because itself entirely already get included
+                     *
+                     * props.item
+                     *        ^--- symbol of "item" is already used, and it's a property access expression
+                     */
+                    // if(isPropertyAccessExpression) return;
+                } else {
+                    const valueDeclaration = symbol.valueDeclaration;
+                    if (valueDeclaration) {
+
+                        // 检查声明是否在箭头函数外部
+                        if (!isNodeDescendant(valueDeclaration, tsNode)) {
+                            // 这是一个外部引用
+                            outerReferences.push({symbol, node: _node});
+                            usedSet.add(symbol);
+                            /**
+                             * No need to dig into the PropertyAccessExpression, because itself entirely already get included
+                             */
+                            // if(isPropertyAccessExpression) return;
+                        }
                     }
+
                 }
+
             }
         }
 
@@ -178,4 +239,4 @@ export const findReferenceUsagesInScope = (
     return outerReferences;
 };
 
-const DependencyExpReg = /node_modules((\/@[^/]+)?(\/[^@/]+))/;
+const DependencyExpReg = /node_modules((\/@[^/]+)?(\/[^.@/]+))/;

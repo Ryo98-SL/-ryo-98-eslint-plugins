@@ -120,7 +120,6 @@ const getTypeFromTsCompiler = (
  * @param shouldAddTypes - Whether to add type definitions
  * @param tsService - TypeScript service
  * @param filename - File name
- * @param context - ESLint context
  * @returns Type annotation
  */
 export const getTypeNodeForProp = (
@@ -131,7 +130,6 @@ export const getTypeNodeForProp = (
     shouldAddTypes: boolean,
     tsService: TsService | null,
     filename: string,
-    context:  TypedRuleContext
 ): ResolvedCompPropTypeInfo | null => {
     // If not a TypeScript file or no type definitions needed, return empty string
     if (!isTypeScriptFile || !shouldAddTypes) {
@@ -275,4 +273,4 @@ export * from './format-output.ts';
 export * from './types.ts';
 export * from './process-config.ts';
 export * from './resolve-imports.ts';
-export * from './test.ts';
+export {createRule} from "./createRule.ts";

@@ -17,11 +17,7 @@ export interface RegExpConfig {
 }
 
 export type TsService = ParserServicesWithTypeInformation;
-export type TypedRuleContext =  Readonly<RuleContext<"noInline" | "fixWithUseHook" | "fixWithTopLevelScopeConstant", [{
-    ignoredComponents: {
-        pattern: string
-    }[]
-}]>>;
+export type TypedRuleContext<T extends string> =  Readonly<RuleContext<T, any[]>>;
 
 type MapNodeUtil<N extends TSESTree.Node, T extends AST_NODE_TYPES> = N extends { type: T } ? N : never;
 type MapNodeWithType<T extends AST_NODE_TYPES> = {

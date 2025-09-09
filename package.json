@@ -1,14 +1,17 @@
 {
-  "name": "eslint-plugin-custom",
-  "module": "index.ts",
+  "name": "eslint-plugin-react-codemod",
+  "description": "React specific codemod with ESLint's ability of autofix",
+  "author": "Ryo98-SL",
+  "license": "MIT",
   "type": "module",
-  "private": true,
+  "version": "0.1.0",
+  "private": false,
   "scripts": {
-    "test-nilo": "bun test ./src/react-attr-autofix/index.test",
-    "autofix": " bun run src/react-attr-autofix/scripts/lint.ts",
-    "bundle": "tsx src/react-attr-autofix/scripts/build.ts",
-    "practice": "bun run /src/ts-practice/direct-import.ts"
+    "test": "vitest",
+    "lint": "bun run /src/lint.ts",
+    "bundle": "rslib build"
   },
+  "main": "dist/index.js",
   "devDependencies": {
     "@babel/cli": "^7.27.0",
     "@babel/core": "^7.26.10",
@@ -19,30 +22,42 @@
     "@babel/preset-typescript": "^7.27.0",
     "@babel/runtime": "^7.27.0",
     "@mui/material": "^7.1.0",
+    "@rslib/core": "^0.12.4",
     "@types/bun": "latest",
-    "@types/escodegen": "^0.0.10",
     "@types/estree": "^1.0.6",
+    "@types/fs-extra": "^11.0.4",
     "@types/node": "^22.13.10",
     "@types/react": "^19.0.12",
     "@types/react-dom": "^19.0.4",
+    "@typescript-eslint/typescript-estree": "^8.39.0",
     "babel-loader": "^10.0.0",
     "bun": "^1.2.11",
+    "fs-extra": "^11.3.1",
+    "glob": "^11.0.3",
     "react": "^19.1.0",
+    "tsx": "^4.19.3",
+    "vitest": "^3.2.4",
     "webpack": "^5.98.0",
     "webpack-cli": "^6.0.1",
     "webpack-node-externals": "^3.0.0"
   },
   "peerDependencies": {
-    "eslint": "^9.22.0",
-    "typescript": "^5.8.2"
+    "eslint": ">=9.0.0",
+    "typescript": ">=5.0.0"
   },
   "dependencies": {
     "@typescript-eslint/eslint-plugin": "^8.27.0",
     "@typescript-eslint/parser": "^8.27.0",
     "@typescript-eslint/rule-tester": "^8.27.0",
-    "escodegen": "^2.1.0",
-    "recast": "^0.23.11",
-    "tsx": "^4.19.3",
+    "@typescript-eslint/utils": "^8.39.0",
     "typescript-eslint": "^8.27.0"
-  }
+  },
+  "keywords": [
+    "eslint",
+    "eslintplugin",
+    "eslint-plugin",
+    "eslint-plugin-react",
+    "react-codemod",
+    "auto-create-hook"
+  ]
 }
